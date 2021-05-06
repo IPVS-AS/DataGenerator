@@ -1,25 +1,13 @@
-# 1.) Generate dataset with n_samples, n_features, n_class, mean_imbalance
-
-# vary the dataset size for a 1:100 imbalanced dataset
 import logging
 import random
 from collections import Counter
 from typing import List
 
-from anytree import NodeMixin, RenderTree
-from anytree.exporter import DotExporter
-from boruta import BorutaPy
+from anytree import RenderTree
 from sklearn.datasets import make_classification, make_blobs
-from sklearn.datasets import make_multilabel_classification
-from matplotlib import pyplot
-from numpy import where
+
 import numpy as np
 import pandas as pd
-from mpl_toolkits.mplot3d import Axes3D
-import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
-from sklearn.impute import SimpleImputer, KNNImputer
-from sklearn.model_selection import train_test_split, cross_val_score
 
 from Hierarchy import Node, HardCodedHierarchy
 import concentrationMetrics as cm
@@ -42,56 +30,12 @@ def assign_class(cls, n_classes):
 
 
 class ImbalanceGenerator:
-    class_separation_dic = {"very_low": 0.1, "low": 0.5, "medium": 1, "high": 2, "very high": 5}
-    imbalance_degrees = ["low", "medium", "high", "equal"]
+    imbalance_degrees = ["low", "normal", "high"]
 
-    def __init__(self, n_samples=1000, n_features=2, clusters_per_class=1, noise=0.0,
-                 class_sep="very_low", imbalance_degree="medium", n_classes=2, weights=None, levels=4, n_groups=10):
+    def __init__(self):
         self.root = None
         self.logger = logging.getLogger(
             self.__module__ + "." + self.__class__.__name__)
-
-        self.class_sep = class_sep
-        self.n_features = n_features
-        self.clusters_per_class = clusters_per_class
-
-        self.noise = noise
-        self.n_samples = n_samples
-        self.imbalance_degree = imbalance_degree
-        self.weights = weights
-
-        if self.class_sep not in ImbalanceGenerator.class_separation_dic:
-            self.logger.warning(
-                f"class separation not knwon, choose one in {ImbalanceGenerator.class_separation_dic.keys()}")
-            self.logger.warning("Setting class separation to medium")
-            self.class_sep = "medium"
-
-        if self.imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
-            self.logger.warning(f"Imbalance degree not knwon, choose one in {ImbalanceGenerator.imbalance_degrees}")
-            self.logger.warning("Setting imbalance degree to medium")
-            self.imbalance_degree = "medium"
-
-        self.class_sep_percent = ImbalanceGenerator.class_separation_dic[self.class_sep]
-        self.n_classes = n_classes
-
-        self.levels = levels
-        self.n_groups = n_groups
-
-    def make_imb_classification(self, weights=None):
-        if weights == None:
-            weights = self._generate_weigths()
-        # weights = self._get_class_weights()
-        X, y = make_classification(n_samples=self.n_samples, n_features=self.n_features, n_redundant=0,
-                                   n_classes=self.n_classes,
-                                   n_clusters_per_class=self.clusters_per_class, flip_y=self.noise,
-                                   class_sep=self.class_sep_percent, weights=weights,
-                                   random_state=0)
-        return X, y
-
-    def _generate_weigths(self):
-        # assign weight for each class to its index
-        weights = [i for i in range(self.n_classes)]
-        return weights
 
     def _eq_div(self, N, i):
         """
@@ -100,10 +44,59 @@ class ImbalanceGenerator:
         """
         return [] if i <= 0 else [N // i + 1] * (N % i) + [N // i] * (i - N % i)
 
-    def generate_product_hierarchy_from_specification(self, root=HardCodedHierarchy().create_hardcoded_hierarchy(),
-                                                      n_features=100,
-                                                      n_samples_total=1050, n_classes=84, features_remove_percent=0.2,
-                                                      imbalance_degree="normal"):
+    def gini(self, x):
+        my_index = cm.Index()
+        counter = Counter(x)
+        return my_index.gini(counter.values())
+
+    def generate_data_with_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
+                                             features_remove_percent=0.2, imbalance_degree="normal",
+                                             root=HardCodedHierarchy().create_hardcoded_hierarchy()):
+
+        """
+        Main method of Data generation.
+        Here, the data is generated according to various parameters.
+        We mainly distinguish if we have an hierarchy given. This should be given with the root parameter that contains
+        the root of an anytree. This root node can be used as representative for the whole tree.
+        If we have a root, we should also have specified
+        :param n_features: number of features to use for the overall generated dataset
+        :param n_samples_total: number of samples that should be generated in the whole dataset
+        :param n_levels: number of levels of the hierachy. Does not need to be specified if a hierarchy is already given!
+        :param total_n_classes: number of classes for the whole dataset
+        :param features_remove_percent: number of features to remove/ actually this means to have this number of percent
+        as missing features in the whole dataset. Currently, this will be +5/6 percent.
+        :param imbalance_degree: The degree of imbalabnce. Should be either 'normal', 'low' or 'high'. Here, normal means
+        to actually use the same (hardcoded) hierarchy that is passed via the root parameter.
+        'low' means to have a more imbalanced dataset and 'high' means to have an even more imbalanced dataset.
+        :param root: Root node of a hierarchy. This should be a root node that represent an anytree and stands for the hierarchy.
+        :return: A dataframe that contains the data and the hierarchy.
+        The data is encoded via the feature columns F_0, ..., F_n_features.
+        The hierarchy is implcitly given through the specific attributes that represent the hierarchy.
+        """
+        if root:
+            # we have a hierarchy given, so we use this hierarchy
+            return self._generate_product_hierarchy_from_specification(root=root, n_features=n_features,
+                                                                       n_samples_total=n_samples_total,
+                                                                       features_remove_percent=features_remove_percent,
+                                                                       n_classes=total_n_classes,
+                                                                       imbalance_degree=imbalance_degree)
+        else:
+            return self._generate_default_product_hierarchy(n_features=n_features, n_samples_total=n_samples_total,
+                                                            total_n_classes=total_n_classes,
+                                                            imbalance_degree=imbalance_degree,
+                                                            features_remove_percent=features_remove_percent,
+                                                            n_levels=n_levels)
+
+    def _generate_product_hierarchy_from_specification(self, root=HardCodedHierarchy().create_hardcoded_hierarchy(),
+                                                       n_features=100,
+                                                       n_samples_total=1050, n_classes=84, features_remove_percent=0.2,
+                                                       imbalance_degree="normal"):
+        if imbalance_degree not in imbalance_degree:
+            self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
+                              f" {imbalance_degree}")
+            self.logger.warning(f"Setting imbalance_degree to default 'normal'")
+            imbalance_degree = "normal"
+
         # generate features for hierarchy
         features = list(range(n_features))
         root.feature_set = features
@@ -184,8 +177,9 @@ class ImbalanceGenerator:
 
                 group_nodes_to_create[group_index] = group_node
 
-        groups = self.generate_product_groups_from_hierarchy(group_nodes_to_create, n_classes,
-                                                             imbalance_degree=imbalance_degree)
+        # Now, we generate the actual data for the groups!
+        groups = self._generate_product_groups_from_hierarchy(group_nodes_to_create, n_classes,
+                                                              imbalance_degree=imbalance_degree)
 
         dfs = []
         levels = list(range(n_levels - 1))
@@ -208,27 +202,16 @@ class ImbalanceGenerator:
 
         return pd.concat(dfs).reset_index()
 
-    def generate_data_with_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                                             features_remove_percent=0.2, imbalance_degree="normal",
-                                             root=HardCodedHierarchy().create_hardcoded_hierarchy()):
-        if root:
-            # we have a hierarchy given, so we use this hierarchy
-            return self.generate_product_hierarchy_from_specification(root=root, n_features=n_features,
-                                                                      n_samples_total=n_samples_total,
-                                                                      features_remove_percent=features_remove_percent,
-                                                                      n_classes=total_n_classes,
-                                                                      imbalance_degree=imbalance_degree)
-        else:
-            return self.generate_default_product_hierarchy(n_features=n_features, n_samples_total=n_samples_total,
-                                                           total_n_classes=total_n_classes,
-                                                           imbalance_degree=imbalance_degree,
-                                                           features_remove_percent=features_remove_percent,
-                                                           n_levels=n_levels)
-
-    def generate_default_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                                           features_remove_percent=0.2, imbalance_degree="normal"):
+    def _generate_default_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
+                                            features_remove_percent=0.2, imbalance_degree="normal"):
         """
-        Generate specification on its own with "default" settings-
+        Generate specification on its own with "default" settings. Here, no hierarchy needs to be passed at all.
+        This is mainly for future work to have a more generic data generator that does not require to have a specific
+        hierarchy.
+        At the moment there is also some code redundancy with the :func:_generate_product_hierarchy_from_specification.
+        However, this will not be maintained at the moment as the focus is on the generation with the
+        hierarchy specification.
+
         :param n_features:
         :param n_samples_total:
         :param n_levels:
@@ -246,7 +229,6 @@ class ImbalanceGenerator:
         total_n_groups = 1
         # calculate how many groups we will have
         # I think this only works when each node in a level has the same number of child nodes
-        # todo: have to check this in the future
         for l in range(n_levels - 1):
             if l == 0:
                 last_total_n_groups = 1
@@ -360,7 +342,7 @@ class ImbalanceGenerator:
 
                 group_nodes_to_create[group_index] = group_node
 
-        groups = self.generate_product_groups_default(group_nodes_to_create, total_n_classes)
+        groups = self._generate_product_groups_default(group_nodes_to_create, total_n_classes)
 
         dfs = []
         levels = list(range(n_levels - 1))
@@ -383,144 +365,22 @@ class ImbalanceGenerator:
 
         return pd.concat(dfs).reset_index()
 
-    def generate_product_groups_default(self, group_nodes: List[Node], total_n_classes, use_blobs=True):
-        resulting_groups = []
-        target_classes = []
-        group_ids = []
+    def _generate_product_groups_from_hierarchy(self, group_nodes: List[Node], total_n_classes,
+                                                imbalance_degree="normal"):
+        """
+        Generates the product groups. That is, here is the actual data generated.
+        For each group, according to the number of classes, samples and features the data is generated.
+        Note, that at the moment we also make us of the class occurences! If these are not specified in the hierarchy,
+        we have to make a different strategy. I will do that in the near future.
 
-        # get set of all features. We need this to keep track of the feature limits of all groups
-        total_sample_feature_set = set([feature for group in group_nodes for feature in group.feature_set])
-
-        # save limits of each feature --> first all are 0.0
-        feature_limits = {feature: 0 for feature in total_sample_feature_set}
-
-        current_class_num = 0
-
-        # bottom up approach
-        for i, group in enumerate(group_nodes):
-            feature_set = group.feature_set
-            n_features = len(feature_set)
-            n_samples = group.n_samples
-            n_classes = group.n_classes
-            classes = group.classes
-
-            # take a random feature along we move the next group
-            feature_to_move = np.random.choice(feature_set)
-            feature_limits[feature_to_move] += 1
-
-            # hard-coded weights for classes
-            # todo: range von samples pro Klasse ist [2, 13].
-            #  Wenn 2 ist wird mit den aktuellen weights nicht alle Klassen generiert!
-            # todo: Spezialfälle beachten!
-
-            n_samples_per_class_avg = n_samples / n_classes
-            # if n_samples_per_class_avg <= 3:
-            #    use_blobs = True
-            if n_classes == 2:
-                weights = [0.95, 0.05]
-            elif n_classes == 3:
-                weights = [0.6, 0.3, 0.1]
-            else:
-                # we define 70% as the three majority classes
-                majority_weights = [0.4, 0.2, 0.1]
-                sum_min_weights = 1 - sum(majority_weights)
-                n_min_classes = n_classes - len(majority_weights)
-                # the rest 30% are equally divided to the other classes
-                minority_weights = [sum_min_weights / n_min_classes for _ in range(n_min_classes)]
-                weights = majority_weights + minority_weights
-            # create dataset for each group
-            n_samples_per_class = [int(w * n_samples) if int(w * n_samples) > 0 else 1 for w in weights]
-
-            # add remaining, i.e., if not all samples are used due to rounding errors
-            if sum(n_samples_per_class) < n_samples:
-                remaining = n_samples - sum(n_samples_per_class)
-                for i in range(remaining):
-                    n_samples_per_class[remaining % len(n_samples_per_class)] += 1
-
-            # todo: Functionality to assign values for the parameters: n_inf, n_red, n_clusters_per_class
-            n_informative = n_features - 1
-
-            X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
-                                       n_clusters_per_class=1,
-                                       n_features=n_features, n_repeated=0, n_redundant=0,
-                                       n_informative=n_informative,
-                                       weights=weights,
-                                       # higher value can cause less classes to be generated
-                                       flip_y=0.01,
-                                       random_state=0,
-                                       # class_sep=0.8,
-                                       hypercube=True
-                                       # shift=None,
-                                       # scale=None
-                                       )
-            created_classes = len(np.unique(y))
-            created_samples = X.shape[0]
-            if created_classes < n_classes:
-                print(f"should create {n_classes} and have created {created_classes} for n_samples {n_samples}")
-
-            if created_samples < n_samples:
-                print(f"should create {n_samples} and have created {created_samples}")
-
-            # third possibility would be to use make_gaussian_qauntiles
-            # moons and circles are also possible
-
-            # normalize x into [0,1] interval
-            X = (X - X.min(0)) / X.ptp(0)
-
-            # also add a random number that makes the intersection between groups "softer"
-            rand_num = random.random()
-            for i, f in enumerate(feature_set):
-                # move each feature by its feature limits
-                X[:, i] = X[:, i] + feature_limits[f]  # - rand_num
-
-            # we create class in range (0, n_classes), but it can be in range (x, x+n_classes)
-            if classes:
-                y = y + min(classes)
-            else:
-                y = y + current_class_num
-            current_class_num += created_classes
-            y = [assign_class(y_, total_n_classes) for y_ in y]
-
-            # we want to assign the data in the hierarchy such that the missing features get already none values
-            # this will make it easier for SPH and CPI
-            X_with_NaNs = np.full((X.shape[0], len(total_sample_feature_set)), np.NaN)
-
-            # X is created by just [0, ..., n_features] and now we map this back to the actual feature set
-            # columsn that are not filled will have the default NaN values
-            for i, feature in enumerate(feature_set):
-                X_with_NaNs[:, feature] = X[:, i]
-
-            if X_with_NaNs.shape[0] != X.shape[0]:
-                print(f"shape of X_with_NaNs is {X_with_NaNs.shape} and for X is {X.shape}")
-            group.data = X_with_NaNs
-            group.target = y
-
-            # add data and labels to parent nodes as well
-            traverse_node = group
-            while traverse_node.parent:
-                traverse_node = traverse_node.parent
-
-                if traverse_node.data is not None:
-                    traverse_node.data = np.concatenate([traverse_node.data, X_with_NaNs])
-                    traverse_node.target = np.concatenate([traverse_node.target, y])
-                else:
-                    traverse_node.data = X_with_NaNs
-                    traverse_node.target = y
-
-            resulting_groups.append(X)
-            target_classes.extend(y)
-            group_ids.extend([i for _ in range(X.shape[0])])
-
-        return group_nodes
-
-    def gini(self, x):
-        my_index = cm.Index()
-        counter = Counter(x)
-        return my_index.gini(counter.values())
-
-    def generate_product_groups_from_hierarchy(self, group_nodes: List[Node], total_n_classes, use_blobs=True,
-                                               imbalance_degree="normal"):
-
+        :param group_nodes: a list of of the nodes from the hierarchy specification.
+        Each node should have at least specified the number of samples and classes.
+        The features do not need necessarily to be specified at the moment.
+        :param total_n_classes: Number of total classes to generate in the whole dataset
+        :param imbalance_degree: Degree of imbalance. Should be one of 'low', 'normal', 'high'.
+        :return: group_nodes: list of nodes that now have set the data and target attributes.
+        Here, we only return the group nodes, but the data and target of the parent nodes is also set!
+        """
         resulting_groups = []
         target_classes = []
         group_ids = []
@@ -578,7 +438,6 @@ class ImbalanceGenerator:
                     occurences = new_occurences
 
                 elif imbalance_degree == 'low':
-
                     # here we want to make the classes more imbalanced
                     # idea: move from majority one sample to each minority class
                     max_occurence = max(occurences)
@@ -599,40 +458,40 @@ class ImbalanceGenerator:
                 # The weights are needed for the sklearn function 'make_classification'
                 weights = [occ / sum(occurences) for occ in occurences]
 
-            # create dataset for each group
-            n_samples_per_class = group.class_occurences
+            else:
+                # if we do not have specified occurences, we use a simple way at the moment, just make the classes somehow equally.
+                # Yet, this will yield a much to imbalanced dataset (gini ~ 0.3)
+                if n_classes == 2:
+                    weights = [0.95, 0.05]
+                elif n_classes == 3:
+                    weights = [0.6, 0.3, 0.1]
+                else:
+                    # we define 70% as the three majority classes
+                    majority_weights = [0.4, 0.2, 0.1]
+                    sum_min_weights = 1 - sum(majority_weights)
+                    n_min_classes = n_classes - len(majority_weights)
+                    # the rest 30% are equally divided to the other classes
+                    minority_weights = [sum_min_weights / n_min_classes for _ in range(n_min_classes)]
+                    weights = majority_weights + minority_weights
 
-            # add remaining, i.e., if not all samples are used due to rounding errors
-            if sum(n_samples_per_class) < n_samples:
-                remaining = n_samples - sum(n_samples_per_class)
-                for i in range(remaining):
-                    n_samples_per_class[remaining % len(n_samples_per_class)] += 1
-
-            cluster_stds = [2 for _ in range(n_classes)]
-
+            # set number of informative features
             n_informative = n_features - 1
 
-            if use_blobs and False:
-                # we do not use blobs atm, maybe in the future?
-                X, y = make_blobs(n_samples=n_samples_per_class, n_features=n_features,
-                                  cluster_std=cluster_stds
-                                  )
-            else:
-                # The questions is, if we need this function if we have e.g., less than 15 samples. Maybe for this, we
-                # can create the patterns manually??
-                X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
-                                           n_clusters_per_class=1,
-                                           n_features=n_features, n_repeated=0, n_redundant=0,
-                                           n_informative=n_informative,
-                                           weights=weights,
-                                           random_state=0,
-                                           # higher value can cause less classes to be generated
-                                           # flip_y=0.01,
-                                           # class_sep=0.8,
-                                           hypercube=True,
-                                           # shift=random.random(),
-                                           # scale=random.random()
-                                           )
+            # The questions is, if we need this function if we have e.g., less than 15 samples. Maybe for this, we
+            # can create the patterns manually?
+            X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
+                                       n_clusters_per_class=1,
+                                       n_features=n_features, n_repeated=0, n_redundant=0,
+                                       n_informative=n_informative,
+                                       weights=weights,
+                                       random_state=0,
+                                       # higher value can cause less classes to be generated
+                                       # flip_y=0.01,
+                                       # class_sep=0.8,
+                                       hypercube=True,
+                                       # shift=random.random(),
+                                       # scale=random.random()
+                                       )
 
             created_classes = len(np.unique(y))
             created_samples = X.shape[0]
@@ -643,8 +502,6 @@ class ImbalanceGenerator:
 
             if created_samples < n_samples:
                 print(f"should create {n_samples} and have created {created_samples}")
-
-            # third possibility would be to use make_gaussian_qauntiles
 
             # normalize x into [0,1] interval
             X = (X - X.min(0)) / X.ptp(0)
@@ -703,17 +560,115 @@ class ImbalanceGenerator:
 
         return group_nodes
 
-    def _get_class_weights(self):
-        """Todo: Easy way to assign weigths by an average input of class imbalance?"""
-        classes = range(self.n_classes)
-        if self.imbalance_degree == "equal":
-            # all classes with same weight
-            return [1 for n in classes]
-        if self.imbalance_degree == "low":
-            # we make each majority class occur twice as often as minority class
-            weights = [1 for n in classes]
-            half_class_n = int(self.n_classes / 2)
-            weights = weights[0:half_class_n] + weights[half_class_n + 1:] * 2
+    def _generate_product_groups_default(self, group_nodes: List[Node], total_n_classes):
+        resulting_groups = []
+        target_classes = []
+        group_ids = []
+
+        # get set of all features. We need this to keep track of the feature limits of all groups
+        total_sample_feature_set = set([feature for group in group_nodes for feature in group.feature_set])
+
+        # save limits of each feature --> first all are 0.0
+        feature_limits = {feature: 0 for feature in total_sample_feature_set}
+
+        current_class_num = 0
+
+        # bottom up approach
+        for i, group in enumerate(group_nodes):
+            feature_set = group.feature_set
+            n_features = len(feature_set)
+            n_samples = group.n_samples
+            n_classes = group.n_classes
+            classes = group.classes
+
+            # take a random feature along we move the next group
+            feature_to_move = np.random.choice(feature_set)
+            feature_limits[feature_to_move] += 1
+
+            # if n_samples_per_class_avg <= 3:
+            #    use_blobs = True
+            if n_classes == 2:
+                weights = [0.95, 0.05]
+            elif n_classes == 3:
+                weights = [0.6, 0.3, 0.1]
+            else:
+                # we define 70% as the three majority classes
+                majority_weights = [0.4, 0.2, 0.1]
+                sum_min_weights = 1 - sum(majority_weights)
+                n_min_classes = n_classes - len(majority_weights)
+                # the rest 30% are equally divided to the other classes
+                minority_weights = [sum_min_weights / n_min_classes for _ in range(n_min_classes)]
+                weights = majority_weights + minority_weights
+
+            n_informative = n_features - 1
+
+            X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
+                                       n_clusters_per_class=1,
+                                       n_features=n_features, n_repeated=0, n_redundant=0,
+                                       n_informative=n_informative,
+                                       weights=weights,
+                                       # higher value can cause less classes to be generated
+                                       flip_y=0.01,
+                                       random_state=0,
+                                       # class_sep=0.8,
+                                       hypercube=True
+                                       # shift=None,
+                                       # scale=None
+                                       )
+            created_classes = len(np.unique(y))
+            created_samples = X.shape[0]
+            if created_classes < n_classes:
+                print(f"should create {n_classes} and have created {created_classes} for n_samples {n_samples}")
+
+            if created_samples < n_samples:
+                print(f"should create {n_samples} and have created {created_samples}")
+
+            # normalize x into [0,1] interval
+            X = (X - X.min(0)) / X.ptp(0)
+
+            for i, f in enumerate(feature_set):
+                # move each feature by its feature limits
+                X[:, i] = X[:, i] + feature_limits[f]
+
+            # we create class in range (0, n_classes), but it can be in range (x, x+n_classes)
+            if classes:
+                y = y + min(classes)
+            else:
+                y = y + current_class_num
+            current_class_num += created_classes
+            y = [assign_class(y_, total_n_classes) for y_ in y]
+
+            # we want to assign the data in the hierarchy such that the missing features get already none values
+            # this will make it easier for SPH and CPI
+            X_with_NaNs = np.full((X.shape[0], len(total_sample_feature_set)), np.NaN)
+
+            # X is created by just [0, ..., n_features] and now we map this back to the actual feature set
+            # columns that are not filled will have the default NaN values
+            for i, feature in enumerate(feature_set):
+                X_with_NaNs[:, feature] = X[:, i]
+
+            if X_with_NaNs.shape[0] != X.shape[0]:
+                print(f"shape of X_with_NaNs is {X_with_NaNs.shape} and for X is {X.shape}")
+            group.data = X_with_NaNs
+            group.target = y
+
+            # add data and labels to parent nodes as well
+            traverse_node = group
+            while traverse_node.parent:
+                traverse_node = traverse_node.parent
+
+                if traverse_node.data is not None:
+                    traverse_node.data = np.concatenate([traverse_node.data, X_with_NaNs])
+                    traverse_node.target = np.concatenate([traverse_node.target, y])
+                else:
+                    traverse_node.data = X_with_NaNs
+                    traverse_node.target = y
+
+            resulting_groups.append(X)
+            target_classes.extend(y)
+            group_ids.extend([i for _ in range(X.shape[0])])
+
+        return group_nodes
 
 
 if __name__ == '__main__':
@@ -721,6 +676,7 @@ if __name__ == '__main__':
         my_index = cm.Index()
         class_frequencies = np.array(list(Counter(x).values()))
         return my_index.gini(class_frequencies)
+
 
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Low Imbalance Degree -------------------------------------')
@@ -757,112 +713,3 @@ if __name__ == '__main__':
     print(RenderTree(root))
     print(f'Gini index for whole data is: {gini_value}')
     print('----------------------------------------------------------------------------------------')
-
-    """
-    n_samples_for_class = []
-    for n in range(50):
-        n_samples_for_class.append(10)
-    for n in range(10):
-        n_samples_for_class.append(20)
-    for n in range(10):
-        n_samples_for_class.append(30)
-    for n in range(5):
-        n_samples_for_class.append(40)
-    for n in range(3):
-        n_samples_for_class.append(50)
-    for n in range(4):
-        n_samples_for_class.append(60)
-    for n in range(1):
-        n_samples_for_class.append(70)
-    for n in range(1):
-        n_samples_for_class.append(100)
-
-    class_counter = Counter(n_samples_for_class)
-    classes = class_counter.keys()
-    numbers = class_counter.values()
-    plt.bar(height=numbers, x=classes)
-    plt.title("Class Distribution")
-    plt.xlabel("#samples")
-    plt.ylabel("#classes")
-    plt.show()
-    """
-"""
-    fig = pyplot.figure()
-    # fig, axes = fig.add_subplot(n_groups, 1, projection="3D")
-    for i in range(n_groups):
-        if i == n_groups - 1:
-            ax = fig.add_subplot(n_groups, 1, 1, projection="3d")
-            group_df = df[df["group"] <= i]
-            # ax = axes[i]
-
-            if i == 0:
-                ax.set_title(f'Classes per group')
-            # scatter plot of examples by class label
-            X = df[["F0", "F1", "F2"]].to_numpy()
-            y = group_df["target"].to_numpy()
-            group = group_df["group"].to_numpy()
-            counter = Counter(y)
-            for label, _ in counter.items():
-                row_ix = where(y == label)[0]
-                ax.scatter(X[row_ix, 0], X[row_ix, 1], X[row_ix, 2], label=str(label))
-            if i == n_groups - 1:
-                ax.legend()
-    # fig.savefig("C:\\Users\\tschecds\\Workspace\\ClassPartitioning\\DataGenerator\\Examples\\class_evolved.png")
-    pyplot.show()
-
-    fig = pyplot.figure()
-    for i in range(n_groups):
-        if i == n_groups - 1:
-
-            ax = fig.add_subplot(n_groups, 1, 1, projection="3d")
-            group_df = df[df["group"] <= i]
-            # ax = axes[i]
-            if i == 0:
-                ax.set_title(f'Groups')
-            X = df[["F0", "F1", "F2"]].to_numpy()
-            y = group_df["target"].to_numpy()
-            group = group_df["group"].to_numpy()
-            counter = Counter(group)
-
-            for label, _ in counter.items():
-                row_ix = where(group == label)[0]
-                ax.scatter(X[row_ix, 0], X[row_ix, 1], X[row_ix, 2], label=str(label))
-            if i == n_groups - 1:
-                ax.legend()
-    # fig.savefig("C:\\Users\\tschecds\\Workspace\\ClassPartitioning\\DataGenerator\\Examples\\group_evolved.png")
-    pyplot.show()
-"""
-"""
-    fig = pyplot.figure(2)
-    ax = fig.add_subplot(2, 1, 1)
-    # pyplot.subplot(4, 2, 2*i+1)
-    ax.set_title(f'actual classes')
-    # ax.set_xticks([])
-    # ax.set_yticks([])
-    # scatter plot of examples by class label
-    counter = Counter(y)
-
-    for label, _ in counter.items():
-        row_ix = where(y == label)[0]
-        ax.scatter(X[row_ix, 0], X[row_ix, 1], label=str(label))
-    ax.legend()
-
-    ax = fig.add_subplot(2, 1, 2)
-    # pyplot.subplot(4, 2, 2*i+1)
-    ax.set_title(f'Groups')
-    # ax.set_xticks([])
-    # ax.set_yticks([])
-    # scatter plot of examples by class label
-    counter = Counter(group)
-
-    for label, _ in counter.items():
-        row_ix = where(group == label)[0]
-        ax.scatter(X[row_ix, 0], X[row_ix, 1], label=str(label))
-    ax.legend()
-    pyplot.show()
-"""
-"""
-    pyplot.show()
-    fig.savefig(
-        "C:\\Users\\tschecds\\Workspace\\ClassPartitioning\\DataGenerator\\Examples\\class_groups_subconcepts.png")
-            """

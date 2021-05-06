@@ -1,46 +1,47 @@
-from collections import Counter
-
-import yaml
 from anytree import RenderTree, PreOrderIter
 from anytree import NodeMixin, RenderTree
 import numpy as np
-from anytree.exporter import DictExporter
-from anytree.importer import DictImporter
-import concentrationMetrics as cm
+
 np.random.seed(1234)
-
-def theil(x):
-    my_index = cm.Index()
-    class_frequencies = np.array(list(Counter(x).values()))
-    return my_index.theil(class_frequencies)
-
-
-def gini(x):
-    my_index = cm.Index()
-    class_frequencies = np.array(list(Counter(x).values()))
-    return my_index.gini(class_frequencies)
 
 
 class NodeInformation:
     def __init__(self, feature_set, n_samples, data=None, n_classes=None, target=None, training_data=None,
                  training_labels=None, classes=None, class_occurences=None):
+        # these are required for the hierarchy specification
         self.feature_set = feature_set
         self.n_samples = n_samples
         self.n_classes = n_classes
+
+        # here we define the overall data
         self.data = data
         self.target = target
+
+        # define what is training data --> makes it easier to store them in the nodes for running the machine learning
+        # algorithms
         self.training_data = training_data
         self.training_labels = training_labels
+
+        # custom data after each of the machine learning steps
         self.sph_data = None
         self.sph_labels = None
         self.cpi_data = None
         self.cpi_labels = None
+
+        # additional information that can be specified, e.g., for a hard-coded hierarchy
         self.classes = classes
         self.class_counter = None
         self.class_occurences = class_occurences
 
 
 class Node(NodeInformation, NodeMixin):
+    """
+    Node class. Keeps track of the information of one node in the whole hierarchy.
+    Basically, the node needs to keep track of the number of sampples (n_samples), features (n_features),
+    classes (n_classes), and the parents/child nodes.
+    This class is based on the NodeInformation/NodeMixin classes from anytree and extends them to also include the
+    specific information.
+    """
 
     def __init__(self, feature_set, n_samples, node_id, parent=None, childrens=None, n_classes=None, data=None,
                  target=None, training_data=None, classes=None, class_occurences=None):
@@ -67,6 +68,8 @@ class Node(NodeInformation, NodeMixin):
         self.name = node_id
         self.node_id = node_id
         self.target = target
+
+        # additional information that would be nice if the class occurences are known
         self.gini = None
 
     def has_child_nodes(self):
@@ -82,32 +85,26 @@ class Node(NodeInformation, NodeMixin):
         return self.__repr__()
 
     def __repr__(self):
-        if self.feature_set:
-            feature_names = [f"F{f}" for f in self.feature_set]
-        else:
-            feature_names = []
-
-        if self.training_labels is not None and len(self.training_labels) > 0:
-            if not self.class_counter:
-                self.class_counter = sorted(list(Counter(self.training_labels).values()), reverse=True)
-                self.gini = round(gini(self.training_labels), 2)
-                self.theil = round(theil(self.training_labels), 2)
-
         if self.classes and self.gini:
-            return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}, n_classes={self.n_classes}, " \
-                   f"gini={round(self.gini, 2)},classes=[{Counter(self.training_labels)}]]"
+            # nice to see gini as well if we set it
+            return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+                   f" n_classes={self.n_classes}, " \
+                   f"gini={round(self.gini, 2)}]]"
         else:
-            return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}, n_classes={self.n_classes}]"
+            return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+                   f" n_classes={self.n_classes}]"
 
 
 class HardCodedHierarchy:
+    """
+    Represents a 'hardcoded' hierarchy that is very close to the Hierarchy from the hirsch et al. paper.
+    We define exactly how many samples, classes, features and even how often each class occurs.
+    """
 
     def __init__(self):
         pass
 
     def create_hardcoded_hierarchy(self):
-        # Todo: Actually we can remove n_classes because it can be derived from classes
-        #  --> However we might need it for "default" variant
         # level 0
         root = Node(node_id="Engine", n_samples=1050, feature_set=None, n_classes=84, classes=(1, 84))
 
@@ -125,14 +122,14 @@ class HardCodedHierarchy:
         om1_2 = Node(node_id="hde-OM1-2", n_samples=10, parent=om1, feature_set=None, n_classes=4, classes=(1, 4),
                      class_occurences=[2, 3, 2, 3])
         om1_3 = Node(node_id="hde-OM1-3", n_samples=37, parent=om1, feature_set=None, n_classes=10, classes=(5, 14),
-                     class_occurences=[8, 5, 3, 3, 3, 3] + [3 for _ in range(11, 15)] )
+                     class_occurences=[8, 5, 3, 3, 3, 3] + [3 for _ in range(11, 15)])
         om1_4 = Node(node_id="hde-OM1-4", n_samples=15, parent=om1, feature_set=None, n_classes=5, classes=(15, 19),
                      class_occurences=[6, 4, 3, 1, 1])
         om1_5 = Node(node_id="hde-OM1-5", n_samples=22, parent=om1, feature_set=None, n_classes=5, classes=(20, 24),
                      class_occurences=[10, 5, 5, 1, 1])
         om1_6 = Node(node_id="hde-OM1-6", n_samples=12, parent=om1, feature_set=None, n_classes=4, classes=(25, 28),
                      class_occurences=[1, 1, 7, 3])
-        #om1_7= Node(node_id="hde-OM1-7", n_samples=4, parent=om1, feature_set=None, n_classes=2, classes=(29, 30),
+        # om1_7= Node(node_id="hde-OM1-7", n_samples=4, parent=om1, feature_set=None, n_classes=2, classes=(29, 30),
         #             class_occurences=[3, 1])
 
         # level 2
@@ -173,15 +170,20 @@ class HardCodedHierarchy:
                          classes=(27, 34), class_occurences=[1, 1, 1, 1, 4, 4, 8, 5])
         mde_om1_3 = Node(node_id="mde-OM1-3", n_samples=81, parent=mde_om1, feature_set=None, n_classes=20,
                          classes=(35, 54),
-                         class_occurences=[3 for _ in range(37, 44)] + [2 for _ in range(44, 53)] + [3, 33] + [3 for _ in range(55, 57)])
+                         class_occurences=[3 for _ in range(37, 44)] + [2 for _ in range(44, 53)] + [3, 33] + [3 for _
+                                                                                                               in
+                                                                                                               range(55,
+                                                                                                                     57)])
         mde_om1_4 = Node(node_id="mde-OM1-4", n_samples=65, parent=mde_om1, feature_set=None, n_classes=15,
                          classes=(54, 68), class_occurences=[17, 13, 11, 7, 5, 2, 2] + [1 for _ in range(61, 69)])
 
         mde_om1_5 = Node(node_id="mde-OM1-5", n_samples=3 + 1, parent=mde_om1, feature_set=None, n_classes=3,
                          classes=(60, 62), class_occurences=[1, 2, 1])
-        mde_om1_6 = Node(node_id="mde-OM1-6", n_samples=17, parent=mde_om1, feature_set=None, n_classes=7, classes=(62, 68),
+        mde_om1_6 = Node(node_id="mde-OM1-6", n_samples=17, parent=mde_om1, feature_set=None, n_classes=7,
+                         classes=(62, 68),
                          class_occurences=[5, 2, 2, 2] + [2 for _ in range(66, 69)])
-        mde_om1_7 = Node(node_id="mde-OM1-7", n_samples=8, parent=mde_om1, feature_set=None, n_classes=3, classes=(67, 69),
+        mde_om1_7 = Node(node_id="mde-OM1-7", n_samples=8, parent=mde_om1, feature_set=None, n_classes=3,
+                         classes=(67, 69),
                          class_occurences=[1, 2, 5])
 
         # level 2
@@ -201,7 +203,8 @@ class HardCodedHierarchy:
         mde_om3_7 = Node(node_id="mde-OM3-7", n_samples=22, parent=mde_om3, feature_set=None, n_classes=5,
                          classes=(60, 64),
                          class_occurences=[9, 6, 3, 2, 2])
-        mde_om3_8 = Node(node_id="mde-OM3-8", n_samples=16, parent=mde_om3, feature_set=None, n_classes=3, classes=(65, 67),
+        mde_om3_8 = Node(node_id="mde-OM3-8", n_samples=16, parent=mde_om3, feature_set=None, n_classes=3,
+                         classes=(65, 67),
                          class_occurences=[10, 5, 1])
         mde_om3_9 = Node(node_id="mde-OM3-9", n_samples=42, parent=mde_om3, feature_set=None, n_classes=10,
                          classes=(63, 72), class_occurences=[20, 10, 3, 3] + [1 for _ in range(67, 73)])
@@ -216,9 +219,9 @@ class HardCodedHierarchy:
                           classes=(45, 84),
                           class_occurences=[95, 48, 45, 35, 1] + [1 for _ in range(50, 60)] + [33]
                                            + [1, 1, 1, 1]
-                                           + [1, 1, 1, 1,1]
                                            + [1, 1, 1, 1, 1]
-                                           + [1, 1, 1,1] + [4 for _ in range(79, 85)])
+                                           + [1, 1, 1, 1, 1]
+                                           + [1, 1, 1, 1] + [4 for _ in range(79, 85)])
         return root
 
 
@@ -227,6 +230,7 @@ print(RenderTree(root))
 nodes = [root]
 
 # test that classes and n_classes is the same in each node
+# this is only needed to test that the Hierarchy is not specified with some typos
 while True:
     next_node = nodes.pop()
     print(next_node)
@@ -243,24 +247,3 @@ for node in product_group_nodes:
     assert sum(node.class_occurences) == node.n_samples
     print(f"len(node.class_occurences): {len(node.class_occurences)} == {node.n_classes}: node.n_classes")
     assert len(node.class_occurences) == node.n_classes
-
-
-def parse_hierarchy_from_df(data_df):
-    root = Node()
-    level_values = np.unique(data_df['level'].values)
-    return None
-
-
-def parse_hierarchy_from_yaml(path):
-    with open(path) as file:
-        data = yaml.load(file)
-        print(data)
-        root = DictImporter().import_(data)
-        print(RenderTree(root))
-        return root
-
-
-def save_root_to_yaml(root_node, path):
-    dct = DictExporter().export(root_node)
-    with open(path, "w") as file:
-        yaml.dump(dct, file)

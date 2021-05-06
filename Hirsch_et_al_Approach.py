@@ -1,14 +1,10 @@
-import itertools
 import os
 import random
 from collections import Counter
 
-import matplotlib
 import pandas as pd
 import numpy as np
 from anytree import PreOrderIter, RenderTree
-from anytree.exporter import DotExporter, DictExporter
-from boruta import BorutaPy
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.impute import KNNImputer
 from sklearn.metrics import jaccard_score, accuracy_score
@@ -16,7 +12,6 @@ from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
 
 from DataGenerator import ImbalanceGenerator
-from Hierarchy import parse_hierarchy_from_yaml, save_root_to_yaml
 
 import matplotlib.pyplot as plt
 import concentrationMetrics as cm
@@ -39,7 +34,23 @@ def gini(x):
     return my_index.gini(class_frequencies)
 
 
-def SPH(root_node, min_samples_per_class=1, max_info_loss=0.4):
+def SPH(root_node, min_samples_per_class=1, max_info_loss=0.25):
+    """
+    Runs the SPH step of Hirsch et al.
+    First, we start at all leave nodes (product groups).
+    Here, all classes that have equal or less than min_samples_per_class are removed.
+    After this, it is checked if more than max_info_loss percent of samples are removed.
+    If yes, we use the surrogate subset, i.e., we use the parent node and apply again our checks on them.
+    :param root_node: The root node of the hierarchy that represent the whole tree (the whole tree can be navigated with
+     the root node).
+    :param min_samples_per_class: number of minimum samples per class. If a class has less than this samples,
+     the class is removed with its samples.
+    :param max_info_loss: maximum information loss that is still be ok when removing classes and samples.
+    If we remove more than this threshold, we go up in the hierarchy.
+    :return: partitions_for_node, i.e., a dictionary that has the node_id as key and the actual node as value. The data
+    that is used after sph is stored in the nodes (actually the data is still stored in the leave nodes).
+    """
+
     # outputs are whole_dataset partitions
     # -> we just return partitions of the nodes, i.e., a dictionary with node id as key and node as value
     # the node will contain the data for sph
@@ -77,9 +88,6 @@ def SPH(root_node, min_samples_per_class=1, max_info_loss=0.4):
 
 
 def SPH_checks(group_data, group_labels, min_samples_per_class=1, max_info_loss=0.25):
-    # todo: maybe its easiest to check here for missing values since surrogate sets are added here and thus the
-    #  missing values
-
     ##############################################################################
     ######## First step: Remove samples, where the class occurs only once ########
     # get samples, lables for this product group
@@ -121,6 +129,14 @@ def SPH_checks(group_data, group_labels, min_samples_per_class=1, max_info_loss=
 
 
 def run_cpi_without_threshold(partition_labels, concentration_function=gini):
+    """
+    Runs a version of the Class Partitioning according to Imbalance (CPI) that does not require any parameters.
+    :param partition_labels: class labels of the partitions.
+    :param concentration_function: function for measuring class imbalance degree. per default, gini is used.
+    :return: indices of the data/labels that should be used after applying the partitioning. This is either a list of
+    indices, meaning there is no partitionign done, or it is a tuple, where the first entry is the
+     minority class indices and the second entry are the majortiy class indices.
+    """
     cm_no_cpi = concentration_function(partition_labels)
     print(f"gini index with no further partitioning is: {cm_no_cpi}")
 
@@ -196,6 +212,13 @@ def run_cpi_without_threshold(partition_labels, concentration_function=gini):
 
 
 def run_cpi_free_in_isolation(X_train, y_train, df_test):
+    """
+    Runs the CPI version without parameters on the whole dataset.
+    :param X_train: Training data (should be a np.array)
+    :param y_train: Training labels, should be a 1d numpy array with len(y) == X.shape[0]
+    :param df_test: dataframe that contains the test data
+    :return: Dataframe that contains the accuracy for different lengths of the reccomendation list.
+    """
     final_indices = run_cpi_without_threshold(y_train)
 
     if isinstance(final_indices, tuple):
@@ -242,12 +265,20 @@ def run_cpi_free_in_isolation(X_train, y_train, df_test):
     else:
         # same result as RF --> but should actually not appear
         cpi_isolation_accuracy_df = rf_df
-        cpi_isolation_accuracy_df['Method'] = 'CPI'
+        cpi_isolation_accuracy_df['Method'] = 'CPI free'
 
     return cpi_isolation_accuracy_df
 
 
-def CPI_no_threshold(node_per_node_id, concentration_function=gini):
+def CPI_no_threshold(node_per_node_id):
+    """
+    Runs CPI without required parameters for each of the product groups, i.e., for each leave node in the tree.
+    This should be containd in the node_per_node_id dictionary.
+    :param node_per_node_id: Dictionary that contains the node_id as key and the corresponding product group/
+    leave node as value.
+    :return: A dictionary that contains the node_id as keys and the modified product group nodes as values. Here,
+    the product group nodes now have cpi_data and cpi_labels set.
+    """
     cpi_partitions_per_node_id = {}
     for node_id, node in node_per_node_id.items():
         print('---------------------------------------------------')
@@ -312,6 +343,17 @@ def run_cpi(partition_labels, concentration_function, cm_threshold, p_threshold)
 
 
 def CPI(node_per_node_id, cm_threshold=0.3, p_threshold=0.7, concentration_function=gini):
+    """
+    Runs CPI with the given thresholds for each of the product groups, i.e., for each leave node in the tree.
+    This should be containd in the node_per_node_id dictionary.
+    :param node_per_node_id: Dictionary that contains the node_id as key and the corresponding product group/
+    leave node as value.
+    :param cm_threshold: Threshold for the concentration function
+    :param p_threshold: Threshold of the p-quantile.
+    :param concentration_function: Concentration function to use, default is gini index.
+    :return: A dictionary that contains the node_id as keys and the modified product group nodes as values. Here,
+    the product group nodes now have cpi_data and cpi_labels set.
+    """
     cpi_partitions_per_node_id = {}
     for node_id, node in node_per_node_id.items():
         node = node_per_node_id[node_id]
@@ -352,6 +394,15 @@ def CPI(node_per_node_id, cm_threshold=0.3, p_threshold=0.7, concentration_funct
 
 
 def preprocessing(cpi_partitions):
+    """
+    Preprocesses the data according to hirsch et al.
+    In particular, this means OvA is applied for partitions where we only have one class.
+
+    :param cpi_partitions:  Dictionary that contains the node_id as key and the corresponding product group/
+    leave node as value.
+    :return: A dictionary that contains the node_id as keys and the modified product group nodes as values. Here,
+    the cpi_data and labels may be modified with the OvA binarization.
+    """
     resulting_partitions = {}
     # structural manipulation
     for key, node in cpi_partitions.items():
@@ -384,6 +435,15 @@ def preprocessing(cpi_partitions):
 
 
 def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
+    """
+    Performs our custom train test splitting.
+    This highly affects the accuracy of this approach.
+
+    :param df: Dataframe of the whole data.
+    :param n_train_samples: number of samples to use for training
+    :param at_least_two_samples: check if we should have at least one sample in the training data for each group.
+    :return: train, test: dataframes that contain training and test data.
+    """
     # split in 750 training samples
     # 300 test samples
     train_percent = n_train_samples / len(df)
@@ -1092,7 +1152,8 @@ if __name__ == '__main__':
                 else:
                     root_node = None
 
-                data_df = generator.generate_data_with_product_hierarchy(root=root_node, imbalance_degree=imbalance_degree)
+                data_df = generator.generate_data_with_product_hierarchy(root=root_node,
+                                                                         imbalance_degree=imbalance_degree)
                 ###############################################################
 
                 # split in training and test data
