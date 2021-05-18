@@ -181,12 +181,15 @@ def run_cpi_without_threshold(partition_labels, concentration_function=gini):
         cm_minority = concentration_function(minority_labels)
         avg_cm = (cm_minority + cm_majority) / 2
 
+        """
         # Greedy procedure, do not consider it now
         if avg_cm > old_gini:
             print(f'Gini index increas from {old_gini} to {avg_cm}, so break!')
             print('----------------------------------------------------------')
             break
+            
         old_gini = avg_cm
+        """
 
         weighted_avg_cm = (cm_minority * len(minority_labels) + cm_majority * len(majority_labels)) / len(
             partition_labels)
@@ -447,13 +450,12 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     # split in 750 training samples
     # 300 test samples
     train_percent = n_train_samples / len(df)
-    test_percent = 1 - train_percent
 
     n_classes = len(np.unique(df["target"].to_numpy()))
 
     # split with stratify such that each class occurs in train and test set
     train, test = train_test_split(df, train_size=train_percent, random_state=1234,
-                                   # stratify=df["target"]
+                                   stratify=df["target"]
                                    )
     n_not_in_train = 1
 
@@ -575,7 +577,7 @@ def create_ensemble(cpi_partitions):
     return model_repository
 
 
-def classifiy_new_samples(model_repo, test_data_df, n_features=100):
+def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+CPI"):
     actual_labels = test_data_df["target"].to_numpy()
     predicted_labels = []
 
@@ -609,10 +611,14 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100):
 
             max_minority = max(minority_probas)
             max_majority = max(majority_probas)
+            #print(f"For target class {y_target} the maximum is")
             if max_minority > max_majority:
                 predicted_label = minority_clf.predict(sample)
+                #print(f"minority with {max_minority} and predicted {predicted_label}")
             else:
                 predicted_label = majority_clf.predict(sample)
+                #print(f"minority with {max_majority} and predicted {predicted_label}")
+
             predicted_probabilities.append({"minority_probabilities": minority_probas,
                                             "minority_classes": minority_clf["forest"].classes_,
                                             "majority_probabilities": majority_probas,
@@ -632,23 +638,33 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100):
     df_test["equal"] = df_test["predicted"] == df_test["target"]
     df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
 
+    acc_per_group_df = pd.DataFrame()
+    if os.path.isfile("acc_per_group.csv"):
+        acc_per_group_df = pd.concat([pd.read_csv("acc_per_group.csv", sep=';', decimal=',', index_col=None),
+                                      acc_per_group_df])
+
     print("--------------------------------------------------------------------------------------------------------")
     print("Classes per group:")
     counter = Counter(zip(df_test['target'].to_numpy(), df_test['group'].values))
-    dict = {"group": [k[1] for k in counter.keys()], "target": [k[0] for k in counter.keys()],
-            "count": [counter[k] for k in counter.keys()]}
-    class_per_group_df = pd.DataFrame.from_dict(dict)
-    class_per_group_df = class_per_group_df.sort_values(["group", "target"])
-    class_per_group_df = class_per_group_df.reset_index()
-    print(class_per_group_df)
+    #dict = {"group": [k[1] for k in counter.keys()], "target": [k[0] for k in counter.keys()],
+    #        "count": [counter[k] for k in counter.keys()]}
+    #class_per_group_df = pd.DataFrame.from_dict(dict)
+    #class_per_group_df = class_per_group_df.sort_values(["group", "target"])
+    #class_per_group_df = class_per_group_df.reset_index()
+    #print(class_per_group_df)
 
+    train_class_counter = Counter(df_train["target"].to_numpy())
     print("accuracy per group:")
-    accuracy_per_group = df_test.groupby(['group', 'target'])["equal"].mean()
+    accuracy_per_group = df_test.groupby(['target'])["equal"].mean()
     accuracy_per_group = accuracy_per_group.reset_index()
-    accuracy_per_group = accuracy_per_group.sort_values(["group", "target"])
-    accuracy_per_group["count"] = class_per_group_df["count"]
+    accuracy_per_group = accuracy_per_group.sort_values(["target"])
+
+    #accuracy_per_group["count"] = class_per_group_df["count"]
+    accuracy_per_group["train count"] = accuracy_per_group["target"].apply(lambda x: train_class_counter[x])
+    accuracy_per_group["Method"] = method
     print(accuracy_per_group)
-    accuracy_per_group.to_csv("class_per_group.csv", sep=';', decimal=',')
+    acc_per_group_df = pd.concat([accuracy_per_group, acc_per_group_df])
+    acc_per_group_df.to_csv("acc_per_group.csv", sep=';', decimal=',', index=False)
 
     print("--------------------------------------------------------------------------------------------------------")
 
@@ -907,7 +923,7 @@ def calculate_sph_accuracy(resulting_nodes_per_node_id):
     model_repo = create_ensemble(cpi_nodes)
 
     # classifiy new samples based on repository
-    predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features)
+    predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features, method="SPH")
 
     # get ranked list
     ranked_list = obtain_ranked_list_R(predicted_probabilities)
@@ -954,7 +970,7 @@ def run_cpi_in_isolation(X_train, y_train, X_test, y_test, concentration_functio
         model_repo = {group: (minority_estimator, majority_estimator) for group in set(df_test['group'].values)}
 
         # classifiy new samples based on repository
-        predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features)
+        predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features, method="CPI")
 
         # get ranked list
         ranked_list = obtain_ranked_list_R(predicted_probabilities)
@@ -1047,19 +1063,19 @@ if __name__ == '__main__':
                         const=True, default=False, action='store_const')
 
     parser.add_argument("-imbalance", help="Degree of imbalance. This should either be 'low', 'normal' or 'high'.",
-                        default='normal', choices=['low', 'normal', 'high'])
+                        default='normal', choices=ImbalanceGenerator.imbalance_degrees)
 
-    parser.add_argument('-max_info_loss', type=int, help="Percentage of information loss to use. Default is 25 percent",
+    parser.add_argument('-max_info_loss', type=float, help="Percentage of information loss to use. Default is 25 percent",
                         nargs='*',
                         required=False, default=[0.25])
 
-    parser.add_argument('-gini_thresholds', type=int,
+    parser.add_argument('-gini_thresholds', type=float,
                         help='Percentage of the threshold for the gini index. Per default, multiple values from 25 '
                              'to 40 in 5th steps are executed.',
                         nargs='*',
                         required=False, default=cm_vals)
 
-    parser.add_argument('-p_thresholds', type=int,
+    parser.add_argument('-p_thresholds', type=float,
                         help='Percentage of the thresholds for the p_quantile. Per default, multiple values from 70 '
                              'to 95 in 5th steps are executed',
                         nargs='*',
@@ -1090,7 +1106,7 @@ if __name__ == '__main__':
     if imbalance_degree == "normal":
         data_output_directory = "data_split"
         result_output_directory = "result_split"
-    elif imbalance_degree == "high" or imbalance_degree == "low":
+    else:
         data_output_directory = f"imbalance_degree/{imbalance_degree}/data_split"
         result_output_directory = f"imbalance_degree/{imbalance_degree}/result_split"
 
@@ -1263,7 +1279,7 @@ if __name__ == '__main__':
             stats_df = pd.DataFrame()
 
             """
-            Try new approach --> CPI withour parameter thresholds!
+            Try new approach --> CPI without parameter thresholds!
             """
             if run_cpi_no_parameters:
                 # todo: basically cpi_free and cpi are very similar --> cpi executed in a loop with the resulting
@@ -1275,13 +1291,13 @@ if __name__ == '__main__':
                 p_val = -1
                 cm_val = -1
 
-                cpi_partitions_per_node = CPI_no_threshold(resulting_nodes_per_node_id,
-                                                           concentration_function=concentration_function)
+                cpi_partitions_per_node = CPI_no_threshold(resulting_nodes_per_node_id)
                 # create model repository
                 model_repo = create_ensemble(cpi_partitions_per_node)
 
                 # classifiy new samples based on repository
-                predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features)
+                predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features,
+                                                                       method="CPI free")
 
                 # get ranked list
                 ranked_list = obtain_ranked_list_R(predicted_probabilities)
@@ -1355,18 +1371,8 @@ if __name__ == '__main__':
                 print(f"    after SPH: {sph_acc}")
 
                 print("-----------------------")
-                writer = pd.ExcelWriter(
-                    f"{result_output_directory}/w_cpi_free_{concentration_measure}_accuracy_all_runs.xlsx",
-                    engine='xlsxwriter')
-                result_df.to_excel(writer,
-                                   index=False, engine='xslxwriter', sheet_name='result')
-
-                worksheet = writer.sheets['result']
-                (max_row, max_col) = df.shape
-                column_settings = [{'header': column} for column in df.columns]
-                worksheet.add_table(0, 0, max_row, max_col - 1, {'columns': column_settings})
-                worksheet.set_column(0, max_col - 1, 12)
-                writer.save()
+                #result_df.to_csv( f"{result_output_directory}/w_cpi_free_{concentration_measure}_accuracy_all_runs.csv",
+                #                   index=False)
 
             else:
 
@@ -1393,7 +1399,8 @@ if __name__ == '__main__':
                     model_repo = create_ensemble(cpi_partitions_per_node)
 
                     # classifiy new samples based on repository
-                    predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features)
+                    predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features,
+                                                                           method="SPH+CPI")
 
                     # get ranked list
                     ranked_list = obtain_ranked_list_R(predicted_probabilities)
@@ -1411,6 +1418,9 @@ if __name__ == '__main__':
                     vitali_df['p value'] = p_val
                     vitali_df["SPH Executed"] = sph_executed
                     vitali_df["Run"] = run_id
+
+                    acc_values = list(acc_vitali.values())
+                    vitali_df["Avg Acc SPH+CPI"] = sum(acc_values)/len(acc_values)
                     result_df = pd.concat([result_df, vitali_df])
 
                     #####################plot ######################################################
@@ -1466,5 +1476,5 @@ if __name__ == '__main__':
                     print(f"    after SPH: {sph_acc}")
                     print(f"    after SPH+CPI: {acc_vitali}")
 
-                    result_df.to_excel(f"{result_output_directory}/{concentration_measure}_accuracy_all_runs.xlsx",
+                    result_df.to_csv(f"{result_output_directory}/{concentration_measure}_accuracy_all_runs.csv",
                                        index=False)

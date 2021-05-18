@@ -30,7 +30,7 @@ def assign_class(cls, n_classes):
 
 
 class ImbalanceGenerator:
-    imbalance_degrees = ["low", "normal", "high"]
+    imbalance_degrees = ['very_low', 'low', 'normal', 'high', 'very_high']
 
     def __init__(self):
         self.root = None
@@ -91,7 +91,7 @@ class ImbalanceGenerator:
                                                        n_features=100,
                                                        n_samples_total=1050, n_classes=84, features_remove_percent=0.2,
                                                        imbalance_degree="normal"):
-        if imbalance_degree not in imbalance_degree:
+        if imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {imbalance_degree}")
             self.logger.warning(f"Setting imbalance_degree to default 'normal'")
@@ -412,7 +412,8 @@ class ImbalanceGenerator:
                     # do nothing in this case
                     pass
 
-                elif imbalance_degree == 'high':
+                elif imbalance_degree == 'high' or imbalance_degree == 'very_high':
+
                     # get max occurence and the index for it
                     max_occurence = max(occurences)
                     max_index = occurences.index(max_occurence)
@@ -423,36 +424,54 @@ class ImbalanceGenerator:
                     # We need this because we do not (!) want to sort the list!
                     # Otherwise this would change the occurence for a specific class
                     new_occurences = occurences.copy()
+                    median = int(np.median(occurences))
 
                     for i, occ in enumerate(occurences):
                         # check if we have at least two samples and this is not the max_occurence.
-                        if occ > 2 and occ < max_occurence:
+                        if occ > median and occ < max_occurence:
                             # This can easily be changed to remove exactly 5%
-                            new_occurences[max_index] += occ - 2
-                            new_occurences[i] = 2
-                            samples_removed += occ - 2
+                            new_occurences[max_index] += occ - median
+                            new_occurences[i] = median
+                            samples_removed += occ - median
 
                         # do we have removed 5% of samples?
-                        if samples_removed >= 0.05 * n_samples:
+                        if samples_removed >= 0.05 * n_samples and imbalance_degree=='high':
                             break
                     occurences = new_occurences
 
-                elif imbalance_degree == 'low':
-                    # here we want to make the classes more imbalanced
-                    # idea: move from majority one sample to each minority class
-                    max_occurence = max(occurences)
-                    max_index = occurences.index(max_occurence)
-                    new_occurences = occurences.copy()
+                elif imbalance_degree == 'low' or imbalance_degree == 'very_low':
 
-                    if len(new_occurences) < max_occurence:
-                        new_occurences = [i + 1 if i != max_occurence else max_occurence for i in new_occurences]
-                        new_occurences[max_index] = max_occurence - len(new_occurences) + 1
-                    else:
-                        new_occurences[0:max_index] = [i + 1 for i in new_occurences[0:max_index]]
-                        new_occurences[max_index + 1:max_occurence - 1] = [i + 1 for i in new_occurences[
-                                                                                          max_index + 1:max_occurence - 1]]
-                        new_occurences[max_index] = 2
-                    occurences = new_occurences
+                    original_average = sum(occurences) / len(occurences)
+                    n_max_classes = 1
+                    if imbalance_degree == 'very_low':
+                        # number of classes that are above average
+                        n_max_classes = len([x for x in occurences if x > original_average])
+
+                    # for each class above average, we run the following procedure
+                    for i in range(n_max_classes):
+                        # here we want to make the classes more imbalanced
+                        # idea: move from majority one sample to each minority class
+                        max_occurence = max(occurences)
+                        max_index = occurences.index(max_occurence)
+                        new_occurences = occurences.copy()
+                        median = np.median(occurences)
+                        average = sum(occurences) / len(occurences)
+                        # important to take integers, we cannot divide float into n buckets later on
+                        median_or_average = int(average) if median == 1 else int(median)
+
+                        if len(new_occurences) < max_occurence:
+                            print(max_occurence - median_or_average)
+                            new_occurences[max_index] = median_or_average
+
+                            # equal division of max - average
+                            rest = self._eq_div((max_occurence - median_or_average), len(new_occurences) - 1)
+
+                            # insert 0 at max position -> We do not want to add something to max.
+                            rest.insert(max_index, 0)
+
+                            for i, r in enumerate(rest):
+                                new_occurences[i] += r
+                        occurences = new_occurences
 
                 # Calculate the weights (in range [0,1]) from the occurrences.
                 # The weights are needed for the sklearn function 'make_classification'
@@ -678,6 +697,19 @@ if __name__ == '__main__':
         return my_index.gini(class_frequencies)
 
 
+
+    print('----------------------------------------------------------------------------------------')
+    print('------------------------------Very Low Imbalance Degree --------------------------------')
+
+    generator = ImbalanceGenerator()
+    df = generator.generate_data_with_product_hierarchy(imbalance_degree="very_low")
+    root = generator.root
+    y_true = df['target'].to_numpy()
+    gini_value = gini(y_true)
+    print(RenderTree(root))
+    print(f'Gini index for whole data is: {gini_value}')
+    print('----------------------------------------------------------------------------------------')
+
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Low Imbalance Degree -------------------------------------')
 
@@ -706,6 +738,18 @@ if __name__ == '__main__':
     print('------------------------------High Imbalance Degree -------------------------------------')
     generator = ImbalanceGenerator()
     df = generator.generate_data_with_product_hierarchy(imbalance_degree="high")
+    y_true = df['target'].to_numpy()
+    gini_value = gini(y_true)
+
+    root = generator.root
+    print(RenderTree(root))
+    print(f'Gini index for whole data is: {gini_value}')
+    print('----------------------------------------------------------------------------------------')
+
+    print('----------------------------------------------------------------------------------------')
+    print('------------------------Very High Imbalance Degree -------------------------------------')
+    generator = ImbalanceGenerator()
+    df = generator.generate_data_with_product_hierarchy(imbalance_degree="very_high")
     y_true = df['target'].to_numpy()
     gini_value = gini(y_true)
 
