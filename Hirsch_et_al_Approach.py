@@ -491,8 +491,12 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
             train = train.append(test_not_in_train)
             test = test_in_train.append(train_subset)
 
-        test.drop(['freq'], axis=1)
-        train.drop(['freq'], axis=1)
+        test = test.drop(['freq'], axis=1)
+        test = test.drop(['marker'], axis=1)
+        #test = test.drop(['predicted'], axis=1)
+
+        train = train.drop(['freq'], axis=1)
+        #train = train.drop(['predicted'], axis=1)
 
     y_train_classes = len(np.unique(train["target"].to_numpy()))
     y_test_classes = len(np.unique(test["target"].to_numpy()))
@@ -632,10 +636,10 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
             predicted_probabilities.append(
                 {"probabilities": probabilities, "classes": clf["forest"].classes_, "target": y_target})
 
-    df_test["predicted"] = predicted_labels
+    test_data_df["predicted"] = predicted_labels
     # check if predicted == equal
-    df_test["accuracy"] = (df_test["predicted"] == df_test["target"])
-    df_test["accuracy"] = df_test["accuracy"].astype(int)
+    test_data_df["accuracy"] = (test_data_df["predicted"] == test_data_df["target"])
+    test_data_df["accuracy"] = test_data_df["accuracy"].astype(int)
     # df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
 
     acc_per_group_df = pd.DataFrame()
@@ -645,7 +649,7 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
 
     print("--------------------------------------------------------------------------------------------------------")
     print("Classes per group:")
-    test_class_group_counter = Counter(zip(df_test['target'].to_numpy(), df_test['group'].values))
+    test_class_group_counter = Counter(zip(test_data_df['target'].to_numpy(), test_data_df['group'].values))
     dict = {"group": [k[1] for k in test_class_group_counter.keys()],
             "target": [k[0] for k in test_class_group_counter.keys()],
             "count": [test_class_group_counter[k] for k in test_class_group_counter.keys()]}
@@ -658,14 +662,14 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
 
     print("accuracy per group:")
 
-    accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
+    accuracy_per_group = test_data_df.groupby(['group'])["accuracy"].mean()
     print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
 
     print(sample_per_class)
     group_counts = df_train['group'].value_counts()
     print(group_counts)
-    group_counts_test = df_test['group'].value_counts()
+    group_counts_test = test_data_df['group'].value_counts()
 
     print(group_counts["mde-OM3-6"])
 
@@ -693,6 +697,8 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
 
     print("--------------------------------------------------------------------------------------------------------")
 
+    test_data_df = test_data_df.drop(['accuracy'], axis='columns')
+    test_data_df = test_data_df.drop(['predicted'], axis='columns')
     # exit()
     correct_classified = [pred_l[0] for act_l, pred_l in zip(actual_labels, predicted_labels) if act_l == pred_l[0]]
     print(f"Correctly classified: {Counter(correct_classified)}")
@@ -994,7 +1000,8 @@ def run_baseline_rf(df_train, df_test):
 
     acc_per_group_df = pd.concat([accuracy_per_group, acc_per_group_df])
     acc_per_group_df.to_csv("acc_per_group.csv", sep=';', decimal=',', index=False)
-
+    df_test = df_test.drop(['accuracy'], axis='columns')
+    df_test = df_test.drop(['predicted'], axis='columns')
     print("--------------------------------------------------------------------------------------------------------")
     ###################################################################################################
     return rf_df, acc_e
@@ -1131,14 +1138,14 @@ if __name__ == '__main__':
     ######################## Default Arguments ####################
     cm_vals = [
         # 0.1, 0.15, 0.2,
-        0.25,
+        #0.25,
         0.3,
         0.35, 0.4
     ]
     p_quantile = [
-        0.7, 0.75,
-        0.8, 0.85,
-        0.9, 0.95
+        0.7,
+        0.8,
+        0.9
     ]
     ###############################################################
 

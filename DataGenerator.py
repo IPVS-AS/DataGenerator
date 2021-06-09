@@ -483,7 +483,7 @@ class ImbalanceGenerator:
 
             else:
                 # if we do not have specified occurences, we use a simple way at the moment, just make the classes somehow equally.
-                # Yet, this will yield a much to imbalanced dataset (gini ~ 0.3)
+                # Yet, this will yield a much too imbalanced dataset (gini ~ 0.3)
                 if n_classes == 2:
                     weights = [0.95, 0.05]
                 elif n_classes == 3:
@@ -544,7 +544,7 @@ class ImbalanceGenerator:
             y = [assign_class(y_, total_n_classes) for y_ in y]
 
             # randomly set 5% of the values to nan
-            X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
+            X.ravel()[np.random.choice(X.size, int(0.02 * X.size), replace=False)] = np.NaN
 
             # we want to assign the data in the hierarchy such that the missing features get already none values
             # this will make it easier for SPH and CPI
