@@ -170,7 +170,7 @@ class HardCodedHierarchy:
                          classes=(27, 34), class_occurences=[1, 1, 1, 1, 4, 4, 8, 5])
         mde_om1_3 = Node(node_id="mde-OM1-3", n_samples=81, parent=mde_om1, feature_set=None, n_classes=20,
                          classes=(35, 54),
-                         class_occurences=[3 for _ in range(37, 44)] + [2 for _ in range(44, 53)] + [3, 33] + [3 for _
+                         class_occurences=[3 for _ in range(35, 42)] + [2 for _ in range(42, 51)] + [3, 33]+ [3 for _
                                                                                                                in
                                                                                                                range(55,
                                                                                                                      57)])
