@@ -21,7 +21,9 @@ from Hierarchy import HardCodedHierarchy
 
 np.random.seed(5)
 
-random_forest_parameters = {'random_state': 1234, 'n_estimators': 200, 'n_jobs': -1}
+random_forest_parameters = {'random_state': 1234, 'n_estimators': 200,
+                            #'n_jobs': -1
+                            }
 
 def theil(x):
     my_index = cm.Index()
@@ -484,7 +486,16 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
         if n_not_in_train > 0:
             # if yes, replace these samples with random samples from training set
             print(f"Classes that occur once in test but not in training data: {n_not_in_train}")
-            drop_indices = np.random.choice(train.index, n_not_in_train)
+            """
+            Todo: If we want to get more frequent classes  
+            probability = [x['freq'] for i,x in train.iterrows()]
+            print(probability)
+            sum_prob = sum(probability)
+            probability = [p/sum_prob for p in probability]
+            """
+            drop_indices = np.random.choice(train.index, n_not_in_train,
+                                            #p=probability
+                                            )
             train_subset = train.loc[drop_indices]
             train = train.drop(drop_indices)
 
@@ -591,7 +602,7 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
     test_data = test_data_df[[f"F{i}" for i in range(n_features)]].to_numpy()
     # test_data = KNNImputer(missing_values=np.nan).fit_transform(test_data)
 
-    for i, (_, row) in enumerate(test_data_df.iterrows()):
+    for i, (_, row) in enumerate(df_test.iterrows()):
         y_target = row["target"]
 
         sample = test_data[i].reshape(1, -1)
@@ -626,87 +637,22 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
                                             "minority_classes": minority_clf["forest"].classes_,
                                             "majority_probabilities": majority_probas,
                                             "majority_classes": majority_classes,
-                                            "target": y_target})
-            predicted_labels.append(predicted_label)
+                                            "target": y_target,
+                                            "group": row["group"]})
+            predicted_labels.append(predicted_label[0])
         else:
 
             probabilities = clf.predict_proba(sample)[0]
             predicted_label = clf.predict(sample)
-            predicted_labels.append(predicted_label)
+            predicted_labels.append(predicted_label[0])
             predicted_probabilities.append(
-                {"probabilities": probabilities, "classes": clf["forest"].classes_, "target": y_target})
-
-    test_data_df["predicted"] = predicted_labels
-    # check if predicted == equal
-    test_data_df["accuracy"] = (test_data_df["predicted"] == test_data_df["target"])
-    test_data_df["accuracy"] = test_data_df["accuracy"].astype(int)
-    # df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
-
-    acc_per_group_df = pd.DataFrame()
-    if os.path.isfile("acc_per_group.csv"):
-        acc_per_group_df = pd.concat([pd.read_csv("acc_per_group.csv", sep=';', decimal=',', index_col=None),
-                                      acc_per_group_df])
-
-    print("--------------------------------------------------------------------------------------------------------")
-    print("Classes per group:")
-    test_class_group_counter = Counter(zip(test_data_df['target'].to_numpy(), test_data_df['group'].values))
-    dict = {"group": [k[1] for k in test_class_group_counter.keys()],
-            "target": [k[0] for k in test_class_group_counter.keys()],
-            "count": [test_class_group_counter[k] for k in test_class_group_counter.keys()]}
-    class_per_group_df = pd.DataFrame.from_dict(dict)
-    class_per_group_df = class_per_group_df.sort_values(["group", "target"])
-    class_per_group_df = class_per_group_df.reset_index()
-    print(class_per_group_df)
-
-    train_class_counter = Counter(zip(df_train["target"].to_numpy(), df_train['group'].tolist()))
-
-    print("accuracy per group:")
-
-    accuracy_per_group = test_data_df.groupby(['group'])["accuracy"].mean()
-    print(accuracy_per_group)
-    sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
-
-    print(sample_per_class)
-    group_counts = df_train['group'].value_counts()
-    print(group_counts)
-    group_counts_test = test_data_df['group'].value_counts()
-
-    print(group_counts["mde-OM3-6"])
-
-    accuracy_per_group = accuracy_per_group.reset_index()
-    accuracy_per_group['train count'] = accuracy_per_group['group'].apply(lambda g: group_counts[g])
-    accuracy_per_group['test count'] = accuracy_per_group['group'].apply(lambda g: group_counts_test[g])
-
-    accuracy_per_group['samples per class'] = accuracy_per_group['group'].apply(lambda g: sample_per_class[g])
-    accuracy_per_group['n_classes'] = accuracy_per_group['train count'] / accuracy_per_group['samples per class']
-
-
-    accuracy_per_group = accuracy_per_group.sort_values(["group"])
-
-
-    print(accuracy_per_group)
-
-    accuracy_per_group["Method"] = method
-    accuracy_per_group["imbalance"] = imbalance_degree
-    accuracy_per_group["p"] = -1 if method =="SPH" else p_val
-    accuracy_per_group["gini"] = -1 if method =="SPH" else cm_val
-    accuracy_per_group["Run"] = run_id
-
-    acc_per_group_df = pd.concat([accuracy_per_group, acc_per_group_df])
-    acc_per_group_df.to_csv("acc_per_group.csv", sep=';', decimal=',', index=False)
-
-    print("--------------------------------------------------------------------------------------------------------")
-
-    test_data_df = test_data_df.drop(['accuracy'], axis='columns')
-    test_data_df = test_data_df.drop(['predicted'], axis='columns')
-    # exit()
-    correct_classified = [pred_l[0] for act_l, pred_l in zip(actual_labels, predicted_labels) if act_l == pred_l[0]]
-    print(f"Correctly classified: {Counter(correct_classified)}")
+                {"probabilities": probabilities, "classes": clf["forest"].classes_, "target": y_target,
+                 "group": row["group"]})
 
     return predicted_probabilities, accuracy_score(actual_labels, predicted_labels)
 
 
-def obtain_ranked_list_R(predicted_probabilities):
+def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
     # predicted labels is a list of dictionaries
     # each dict either contains the probabilities or the probabilities for min/majority separately
     # it also contains the classes (should be same order as probabilties) and the actual target value (y_true)
@@ -771,6 +717,67 @@ def obtain_ranked_list_R(predicted_probabilities):
             dic["probabilities"] = [tup[0] for tup in sorted_merged_list]
             dic["classes"] = [tup[1] for tup in sorted_merged_list]
             result_list.append(dic)
+
+    df_test["accuracy"] = [1 if result["classes"][0] == result["target"] else 0 for result in result_list]
+    df_test["accuracy"] = df_test["accuracy"].astype(int)
+    print(df_test["target"].dtype)
+
+    print("------------------------------------------------------")
+    print(f"Mean Accuracy for {method} is:")
+    print(df_test["accuracy"].mean())
+    # df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
+
+    acc_per_group_df = pd.DataFrame()
+    acc_per_target_df = pd.DataFrame()
+    if os.path.isfile("acc_per_group.csv"):
+        acc_per_group_df = pd.concat([pd.read_csv("acc_per_group.csv", sep=';', decimal=',', index_col=None),
+                                      acc_per_group_df])
+
+    if os.path.isfile("acc_per_target.csv"):
+        acc_per_target_df = pd.concat([pd.read_csv("acc_per_target.csv", sep=';', decimal=',', index_col=None),
+                                      acc_per_target_df])
+    print("--------------------------------------------------------------------------------------------------------")
+    print("accuracy per group:")
+
+    accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
+    sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
+    count_target_per_group = pd.concat([df_train, df_test]).value_counts(['group','target'])
+
+    accuracy_per_target = df_test.groupby(['group', 'target'])["accuracy"].mean()
+    accuracy_per_target = accuracy_per_target.reset_index()
+
+    accuracy_per_target["Method"] = method
+    accuracy_per_target["total count"] = accuracy_per_target.apply(lambda row: count_target_per_group[row['group']][row['target']], axis='columns')
+    accuracy_per_target["p"] = -1 if method =="SPH" else p_val
+    accuracy_per_target["gini"] = -1 if method =="SPH" else cm_val
+    accuracy_per_target["Run"] = run_id
+
+    print(acc_per_target_df)
+    print(accuracy_per_target)
+    acc_per_target_df = pd.concat([accuracy_per_target, acc_per_target_df])
+    acc_per_target_df.to_csv("acc_per_target.csv", sep=';', decimal=',', index=False)
+
+    group_counts = df_train['group'].value_counts()
+    group_counts_test = df_test['group'].value_counts()
+
+    accuracy_per_group = accuracy_per_group.reset_index()
+    accuracy_per_group['train count'] = accuracy_per_group['group'].apply(lambda g: group_counts[g])
+    accuracy_per_group['test count'] = accuracy_per_group['group'].apply(lambda g: group_counts_test[g])
+    accuracy_per_group['samples per class'] = accuracy_per_group['group'].apply(lambda g: sample_per_class[g])
+    accuracy_per_group['n_classes'] = accuracy_per_group['train count'] / accuracy_per_group['samples per class']
+    accuracy_per_group = accuracy_per_group.sort_values(["group"])
+
+    print(accuracy_per_group)
+
+    accuracy_per_group["Method"] = method
+    accuracy_per_group["imbalance"] = imbalance_degree
+    accuracy_per_group["p"] = -1 if method =="SPH" else p_val
+    accuracy_per_group["gini"] = -1 if method =="SPH" else cm_val
+    accuracy_per_group["Run"] = run_id
+
+    acc_per_group_df = pd.concat([accuracy_per_group, acc_per_group_df])
+    acc_per_group_df.to_csv("acc_per_group.csv", sep=';', decimal=',', index=False)
+    print("--------------------------------------------------------------------------------------------------------")
 
     return result_list
 
@@ -947,8 +954,8 @@ def run_baseline_rf(df_train, df_test):
     predicted_labels = rf.predict(X_test)
     df_test["predicted"] = predicted_labels
     # check if predicted == equal
-    df_test["equal"] = (df_test["predicted"] == df_test["target"])
-    df_test["equal"] = df_test["equal"].astype(int)
+    df_test["accuracy"] = (df_test["predicted"] == df_test["target"])
+    df_test["accuracy"] = df_test["accuracy"].astype(int)
     # df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
 
     acc_per_group_df = pd.DataFrame()
@@ -956,30 +963,13 @@ def run_baseline_rf(df_train, df_test):
         acc_per_group_df = pd.concat([pd.read_csv("acc_per_group.csv", sep=';', decimal=',', index_col=None),
                                       acc_per_group_df])
     print("--------------------------------------------------------------------------------------------------------")
-    print("Classes per group:")
-    test_class_group_counter = Counter(zip(df_test['target'].to_numpy(), df_test['group'].values))
-    dict = {"group": [k[1] for k in test_class_group_counter.keys()],
-            "target": [k[0] for k in test_class_group_counter.keys()],
-            "count": [test_class_group_counter[k] for k in test_class_group_counter.keys()]}
-    class_per_group_df = pd.DataFrame.from_dict(dict)
-    class_per_group_df = class_per_group_df.sort_values(["group", "target"])
-    class_per_group_df = class_per_group_df.reset_index()
-    print(class_per_group_df)
-
-    train_class_counter = Counter(zip(df_train["target"].to_numpy(), df_train['group'].tolist()))
-
     print("accuracy per group:")
 
     accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
-    print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
 
-    print(sample_per_class)
     group_counts = df_train['group'].value_counts()
-    print(group_counts)
     group_counts_test = df_test['group'].value_counts()
-
-    print(group_counts["mde-OM3-6"])
 
     accuracy_per_group = accuracy_per_group.reset_index()
     accuracy_per_group['train count'] = accuracy_per_group['group'].apply(lambda g: group_counts[g])
@@ -1020,7 +1010,7 @@ def calculate_sph_accuracy(resulting_nodes_per_node_id):
     predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features, method="SPH")
 
     # get ranked list
-    ranked_list = obtain_ranked_list_R(predicted_probabilities)
+    ranked_list = obtain_ranked_list_R(predicted_probabilities, method="SPH")
 
     # get accuracy by length e, default e=10
     sph_acc, sph_df = accuracy_for_e(ranked_list)
@@ -1065,7 +1055,7 @@ def run_cpi_in_isolation(X_train, y_train, X_test, y_test, concentration_functio
         predicted_probabilities, score = classifiy_new_samples(model_repo, df_test, n_features=n_features, method="CPI")
 
         # get ranked list
-        ranked_list = obtain_ranked_list_R(predicted_probabilities)
+        ranked_list = obtain_ranked_list_R(predicted_probabilities, method="CPI")
 
         # get accuracy by length e, default e=10
         cpi_isolation_accuracy, cpi_isolation_accuracy_df = accuracy_for_e(ranked_list)
@@ -1509,7 +1499,7 @@ if __name__ == '__main__':
                                                                                method="SPH+CPI")
 
                         # get ranked list
-                        ranked_list = obtain_ranked_list_R(predicted_probabilities)
+                        ranked_list = obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI")
 
                         # get accuracy by length e, default e=10
                         acc_vitali, vitali_df = accuracy_for_e(ranked_list)

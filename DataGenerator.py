@@ -544,7 +544,7 @@ class ImbalanceGenerator:
             y = [assign_class(y_, total_n_classes) for y_ in y]
 
             # randomly set 5% of the values to nan
-            X.ravel()[np.random.choice(X.size, int(0.02 * X.size), replace=False)] = np.NaN
+            X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
 
             # we want to assign the data in the hierarchy such that the missing features get already none values
             # this will make it easier for SPH and CPI
