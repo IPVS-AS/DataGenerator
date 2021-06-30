@@ -4,6 +4,7 @@ from collections import Counter
 from typing import List
 
 from anytree import RenderTree
+from skclean.simulate_noise import flip_labels_uniform
 from sklearn.datasets import make_classification, make_blobs
 
 import numpy as np
@@ -13,7 +14,7 @@ from sklearn.impute import KNNImputer
 from Hierarchy import Node, HardCodedHierarchy
 import concentrationMetrics as cm
 
-np.random.seed(1)
+random_state = np.random.seed(1)
 random.seed(1)
 
 
@@ -52,7 +53,7 @@ class ImbalanceGenerator:
 
     def generate_data_with_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
                                              features_remove_percent=0.2, imbalance_degree="normal",
-                                             root=HardCodedHierarchy().create_hardcoded_hierarchy()):
+                                             root=HardCodedHierarchy().create_hardcoded_hierarchy(), seed=random_state):
 
         """
         Main method of Data generation.
@@ -79,19 +80,20 @@ class ImbalanceGenerator:
             return self._generate_product_hierarchy_from_specification(root=root, n_features=n_features,
                                                                        n_samples_total=n_samples_total,
                                                                        features_remove_percent=features_remove_percent,
-                                                                       n_classes=total_n_classes,
+                                                                       n_classes=total_n_classes, seed=seed,
                                                                        imbalance_degree=imbalance_degree)
         else:
             return self._generate_default_product_hierarchy(n_features=n_features, n_samples_total=n_samples_total,
                                                             total_n_classes=total_n_classes,
                                                             imbalance_degree=imbalance_degree,
                                                             features_remove_percent=features_remove_percent,
-                                                            n_levels=n_levels)
+                                                            n_levels=n_levels, seed=seed)
 
     def _generate_product_hierarchy_from_specification(self, root=HardCodedHierarchy().create_hardcoded_hierarchy(),
                                                        n_features=100,
                                                        n_samples_total=1050, n_classes=84, features_remove_percent=0.2,
-                                                       imbalance_degree="normal"):
+                                                       imbalance_degree="normal", seed=random_state):
+        np.random.seed(seed)
         if imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {imbalance_degree}")
@@ -194,6 +196,8 @@ class ImbalanceGenerator:
             df = pd.DataFrame(group.data, columns=features_names)
             # assign classes and groups
             df["target"] = group.target
+            df["noisy target"] = group.noisy_target
+
             df["group"] = group.node_id
 
             # assign higher values of the hierarchy to the group (i.e., the levels)
@@ -204,7 +208,7 @@ class ImbalanceGenerator:
         return pd.concat(dfs).reset_index()
 
     def _generate_default_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                                            features_remove_percent=0.2, imbalance_degree="normal"):
+                                            features_remove_percent=0.2, imbalance_degree="normal", seed=random_state):
         """
         Generate specification on its own with "default" settings. Here, no hierarchy needs to be passed at all.
         This is mainly for future work to have a more generic data generator that does not require to have a specific
@@ -220,6 +224,8 @@ class ImbalanceGenerator:
         :param features_remove_percent:
         :return:
         """
+
+        np.random.seed(random_state)
 
         # Basic idea is to first specify features, classes and samples for each node on each level
         # Second, the nodes are created based on the specification
@@ -357,6 +363,7 @@ class ImbalanceGenerator:
             df = pd.DataFrame(group.data, columns=features_names)
             # assign classes and groups
             df["target"] = group.target
+            df["noisy target"] = group.noisy_target
             df["group"] = group.node_id
 
             # assign higher values of the hierarchy to the group (i.e., the levels)
@@ -367,7 +374,7 @@ class ImbalanceGenerator:
         return pd.concat(dfs).reset_index()
 
     def _generate_product_groups_from_hierarchy(self, group_nodes: List[Node], total_n_classes,
-                                                imbalance_degree="normal"):
+                                                imbalance_degree="normal", noise=0):
         """
         Generates the product groups. That is, here is the actual data generated.
         For each group, according to the number of classes, samples and features the data is generated.
@@ -500,6 +507,7 @@ class ImbalanceGenerator:
             # set number of informative features
             n_informative = n_features - 1
 
+
             # The questions is, if we need this function if we have e.g., less than 15 samples. Maybe for this, we
             # can create the patterns manually?
             X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
@@ -516,8 +524,13 @@ class ImbalanceGenerator:
                                        # scale=random.random()
                                        )
 
+            # Define noise to use --> only use if more than 30 samples in the group
+            if noise > 0 and n_samples > 30:
+                y_noise = flip_labels_uniform(y, noise)
             created_classes = len(np.unique(y))
             created_samples = X.shape[0]
+
+            # todo: If we do not generated n_classes or n_samples (or both), we could generate/relabel them
             if created_classes < n_classes:
                 print(
                     f"should create {n_classes} and have created {created_classes} classes for n_samples {n_samples} "
@@ -529,11 +542,9 @@ class ImbalanceGenerator:
             # normalize x into [0,1] interval
             X = (X - X.min(0)) / X.ptp(0)
 
-            # also add a random number that makes the intersection between groups "softer"
-            rand_num = random.random()
             for i, f in enumerate(feature_set):
                 # move each feature by its feature limits
-                X[:, i] = X[:, i] + feature_limits[f]  # - rand_num
+                X[:, i] = X[:, i] + feature_limits[f]
 
             # we create class in range (0, n_classes), but it can be in range (x, x+n_classes)
             if classes:
@@ -625,19 +636,28 @@ class ImbalanceGenerator:
 
             n_informative = n_features - 1
 
-            X, y = make_classification(n_samples=n_samples, n_classes=n_classes,
+            noise = 0.0
+            if n_samples > 20:
+                noise = 0.1
+
+            X, y = make_classification(n_samples=n_samples,
+                                       n_classes=n_classes,
                                        n_clusters_per_class=1,
                                        n_features=n_features, n_repeated=0, n_redundant=0,
                                        n_informative=n_informative,
                                        weights=weights,
                                        # higher value can cause less classes to be generated
-                                       flip_y=0.01,
+                                       flip_y=0,
                                        random_state=0,
                                        # class_sep=0.8,
                                        hypercube=True
                                        # shift=None,
                                        # scale=None
                                        )
+
+            if noise > 0:
+                y_noise = flip_labels_uniform(y, noise)
+
             created_classes = len(np.unique(y))
             created_samples = X.shape[0]
             if created_classes < n_classes:
@@ -661,6 +681,11 @@ class ImbalanceGenerator:
             current_class_num += created_classes
             y = [assign_class(y_, total_n_classes) for y_ in y]
 
+            if noise > 0:
+                y_noise = [assign_class(y_, total_n_classes) for y_ in y_noise]
+            else:
+                y_noise = y
+
             # we want to assign the data in the hierarchy such that the missing features get already none values
             # this will make it easier for SPH and CPI
             X_with_NaNs = np.full((X.shape[0], len(total_sample_feature_set)), np.NaN)
@@ -674,6 +699,7 @@ class ImbalanceGenerator:
                 print(f"shape of X_with_NaNs is {X_with_NaNs.shape} and for X is {X.shape}")
             group.data = X_with_NaNs
             group.target = y
+            group.noisy_target = y_noise
 
             # add data and labels to parent nodes as well
             traverse_node = group
@@ -683,9 +709,11 @@ class ImbalanceGenerator:
                 if traverse_node.data is not None:
                     traverse_node.data = np.concatenate([traverse_node.data, X_with_NaNs])
                     traverse_node.target = np.concatenate([traverse_node.target, y])
+                    traverse_node.noisy_target = np.concatenate([traverse_node.noisy_target])
                 else:
                     traverse_node.data = X_with_NaNs
                     traverse_node.target = y
+                    traverse_node.noisy_target = y_noise
 
             resulting_groups.append(X)
             target_classes.extend(y)
@@ -697,6 +725,7 @@ class ImbalanceGenerator:
 if __name__ == '__main__':
     from sklearn.tree import DecisionTreeClassifier, plot_tree
     import matplotlib.pyplot as plt
+
 
     def gini(x):
         my_index = cm.Index()
@@ -716,18 +745,6 @@ if __name__ == '__main__':
     print(f'Gini index for whole data is: {gini_value}')
     print('----------------------------------------------------------------------------------------')
 
-    X = df[["F0","F10"]]
-    y = df["target"].to_numpy()
-    y = df[f"level-1"]
-
-    X = KNNImputer().fit_transform(X)
-
-    plt.figure()
-    clf = DecisionTreeClassifier(max_depth=3).fit(X, y)
-    plot_tree(clf, filled=True)
-    plt.show()
-
-    """
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Low Imbalance Degree -------------------------------------')
 
@@ -777,6 +794,4 @@ if __name__ == '__main__':
     counter = Counter(df["target"].to_numpy())
     counter_one = {t: counter[t] for t in counter.keys() if counter[t] == 1}
     print(f"number of classes that have only one sample: {counter_one}")
-    print('----------------------------------------------------------------------------------------') 
-    
-    """
+    print('----------------------------------------------------------------------------------------')

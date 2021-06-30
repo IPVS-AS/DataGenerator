@@ -7,7 +7,7 @@ np.random.seed(1234)
 
 class NodeInformation:
     def __init__(self, feature_set, n_samples, data=None, n_classes=None, target=None, training_data=None,
-                 training_labels=None, classes=None, class_occurences=None):
+                 training_labels=None, classes=None, class_occurences=None, noisy_target=None):
         # these are required for the hierarchy specification
         self.feature_set = feature_set
         self.n_samples = n_samples
@@ -16,6 +16,9 @@ class NodeInformation:
         # here we define the overall data
         self.data = data
         self.target = target
+
+        # Helper if we want to use noisy class labels
+        self.noisy_target = noisy_target
 
         # define what is training data --> makes it easier to store them in the nodes for running the machine learning
         # algorithms
@@ -44,10 +47,10 @@ class Node(NodeInformation, NodeMixin):
     """
 
     def __init__(self, feature_set, n_samples, node_id, parent=None, childrens=None, n_classes=None, data=None,
-                 target=None, training_data=None, classes=None, class_occurences=None):
+                 target=None, noisy_target=None, training_data=None, classes=None, class_occurences=None):
         super(Node, self).__init__(feature_set=feature_set, n_samples=n_samples, n_classes=n_classes, data=data,
                                    target=target, training_data=training_data, classes=classes,
-                                   class_occurences=class_occurences)
+                                   class_occurences=class_occurences, noisy_target=noisy_target)
         self.feature_set = feature_set
         if self.children:
             self.children.extend(childrens)
@@ -68,6 +71,7 @@ class Node(NodeInformation, NodeMixin):
         self.name = node_id
         self.node_id = node_id
         self.target = target
+        self.noisy_target = noisy_target
 
         # additional information that would be nice if the class occurences are known
         self.gini = None

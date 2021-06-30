@@ -317,35 +317,6 @@ def CPI_no_threshold(node_per_node_id):
     return cpi_partitions_per_node_id
 
 
-def run_cpi(partition_labels, concentration_function, cm_threshold, p_threshold):
-    ############# Detector: Check if gini threshold reached ###################################################
-    # We now call this concentration measure (cm), as it could also be theil, shannon, ... index
-    cm_value = concentration_function(partition_labels)
-
-    if cm_value > cm_threshold:
-        ######### If yes then divsior is executed, i.e., partition to minority and majority sampels ###########
-        class_counter = Counter(partition_labels)
-        print("partition min/majority")
-        print(class_counter)
-        class_freq = np.array(list(class_counter.values()))
-        # calculate q quantile of classes
-        class_threshold = np.quantile(class_freq, p_threshold)
-
-        # divide according to q quantile value the partition into minority and majority samples
-        minority_indices = [ind for ind, label in enumerate(partition_labels) if
-                            class_counter[label] <= class_threshold]
-        # should be the same as all data without minority classes
-        majority_indices = [ind for ind, _ in enumerate(partition_labels) if ind not in minority_indices]
-        print("class threshold: {}".format(class_threshold))
-
-        # assert that we still have the same amount of samples and labels
-        assert len(minority_indices) + len(majority_indices) == len(partition_labels)
-        return minority_indices, majority_indices
-
-    else:
-        return partition_labels
-
-
 def CPI(node_per_node_id, cm_threshold=0.3, p_threshold=0.7, concentration_function=gini):
     """
     Runs CPI with the given thresholds for each of the product groups, i.e., for each leave node in the tree.
@@ -380,11 +351,17 @@ def CPI(node_per_node_id, cm_threshold=0.3, p_threshold=0.7, concentration_funct
                 print("class counter Majority: {}".format(Counter(np.take(node.sph_labels, majority_indices, axis=0))))
                 print(f"CPI executed on node {node_id}")
 
+                print(f"Gini before is: {gini(partition_labels)}")
+
                 node.cpi_labels = (
                     np.take(node.sph_labels, minority_indices, axis=0),  # minority labels
                     np.take(node.sph_labels, majority_indices, axis=0)  # majority labels
                 )
-
+                print(f"Gini index for minority is: {gini(node.cpi_labels[0])}")
+                majority_labels = node.cpi_labels[1]
+                if len(np.unique(node.cpi_labels[1])) == 1:
+                    majority_labels = np.concatenate([majority_labels, np.array([-1 for _  in node.cpi_labels[0]])])
+                print(f"Gini index for majority is: {gini(majority_labels)}")
             else:
                 node.cpi_data = node.sph_data
                 node.cpi_labels = node.sph_labels
@@ -395,6 +372,35 @@ def CPI(node_per_node_id, cm_threshold=0.3, p_threshold=0.7, concentration_funct
         cpi_partitions_per_node_id[node_id] = node
 
     return cpi_partitions_per_node_id
+
+
+def run_cpi(partition_labels, concentration_function, cm_threshold, p_threshold):
+    ############# Detector: Check if gini threshold reached ###################################################
+    # We now call this concentration measure (cm), as it could also be theil, shannon, ... index
+    cm_value = concentration_function(partition_labels)
+
+    if cm_value > cm_threshold:
+        ######### If yes then divsior is executed, i.e., partition to minority and majority sampels ###########
+        class_counter = Counter(partition_labels)
+        print("partition min/majority")
+        print(class_counter)
+        class_freq = np.array(list(class_counter.values()))
+        # calculate q quantile of classes
+        class_threshold = np.quantile(class_freq, p_threshold)
+
+        # divide according to q quantile value the partition into minority and majority samples
+        minority_indices = [ind for ind, label in enumerate(partition_labels) if
+                            class_counter[label] <= class_threshold]
+        # should be the same as all data without minority classes
+        majority_indices = [ind for ind, _ in enumerate(partition_labels) if ind not in minority_indices]
+        print("class threshold: {}".format(class_threshold))
+
+        # assert that we still have the same amount of samples and labels
+        assert len(minority_indices) + len(majority_indices) == len(partition_labels)
+        return minority_indices, majority_indices
+
+    else:
+        return partition_labels
 
 
 def preprocessing(cpi_partitions):
@@ -720,7 +726,16 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
 
     df_test["accuracy"] = [1 if result["classes"][0] == result["target"] else 0 for result in result_list]
     df_test["accuracy"] = df_test["accuracy"].astype(int)
-    print(df_test["target"].dtype)
+
+    print([result['target'] for result in result_list])
+    print([result['classes'] for result in result_list])
+
+    # assign average accuracy, i.e., (10 - correct_position_index)/10 if the class is somewhere in the list. So for example,
+    # if first positition is correct, we have (10 - 0)/10 = 1 or if third position, we have (10 - 2)/10 = 0.8
+    # If the class does not occur at all in first 10 postitions, it is 0.
+    df_test["Avg A@e"] = [0 if result['target'] not in result["classes"][0:10] else (10 - result["classes"].index(result['target']))/10 for result in result_list]
+    print(df_test["Avg A@e"].max())
+    print(df_test["Avg A@e"].min())
 
     print("------------------------------------------------------")
     print(f"Mean Accuracy for {method} is:")
@@ -739,11 +754,12 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
     print("--------------------------------------------------------------------------------------------------------")
     print("accuracy per group:")
 
-    accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
+    accuracy_per_group = df_test.groupby(['group'])["accuracy", "Avg A@e"].mean()
+    print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
     count_target_per_group = pd.concat([df_train, df_test]).value_counts(['group','target'])
 
-    accuracy_per_target = df_test.groupby(['group', 'target'])["accuracy"].mean()
+    accuracy_per_target = df_test.groupby(['group', 'target'])["accuracy", "Avg A@e"].mean()
     accuracy_per_target = accuracy_per_target.reset_index()
 
     accuracy_per_target["Method"] = method
@@ -754,6 +770,7 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
 
     print(acc_per_target_df)
     print(accuracy_per_target)
+
     acc_per_target_df = pd.concat([accuracy_per_target, acc_per_target_df])
     acc_per_target_df.to_csv("acc_per_target.csv", sep=';', decimal=',', index=False)
 
@@ -843,6 +860,7 @@ def calc_stats_SPH(root_node, concentration_function=gini):
     sph_cm = sph_cm / len(product_group_nodes)
 
     missing_values = []
+    n_features_SPH = []
     for node in product_group_nodes:
         data = np.array(node.sph_data)
         df = pd.DataFrame(data=data, columns=[f"F{i}" for i in range(data.shape[1])])
@@ -851,6 +869,7 @@ def calc_stats_SPH(root_node, concentration_function=gini):
         missing_value_df = pd.DataFrame({'column_name': df.columns,
                                          'percent_missing': percent_missing})
 
+        n_features_SPH.append(df.shape[1])
         missing = missing_value_df.mean(axis=0)
         missing_values.append(missing)
 
@@ -860,7 +879,8 @@ def calc_stats_SPH(root_node, concentration_function=gini):
     n_samples_per_group = [len(node.sph_data) for node in product_group_nodes]
     n_samples_per_group = sum(n_samples_per_group) / len(n_samples_per_group)
 
-    return sph_cm, n_classes_per_group, n_samples_per_group, sum(missing_values) / len(missing_values)
+    return sph_cm, n_classes_per_group, n_samples_per_group, sum(missing_values) / len(missing_values), \
+           sum(n_features_SPH)/len(n_features_SPH)
 
 
 def calc_stats_CPI(root_node, concentration_function=gini):
@@ -868,10 +888,14 @@ def calc_stats_CPI(root_node, concentration_function=gini):
     resulting_labels = []
     samples = []
     missing_values = []
+    n_features_cpi = []
+    cpi_count = 0
+
     for node in product_group_nodes:
         labels = node.cpi_labels
 
         if isinstance(labels, tuple):
+            cpi_count += 1
             min_labels = labels[0]
             maj_labels = labels[1]
             resulting_labels.append(min_labels)
@@ -888,6 +912,7 @@ def calc_stats_CPI(root_node, concentration_function=gini):
             data = np.concatenate((node.cpi_data[0], maj_data))
             df = pd.DataFrame(data=data, columns=[f"F{i}" for i in range(node.cpi_data[0].shape[1])])
             df = df.dropna(axis=1, how='all')
+            n_features_cpi.append(df.shape[1])
 
             percent_missing = df.isnull().sum() * 100 / len(df)
             missing_value_df = pd.DataFrame({'column_name': df.columns,
@@ -903,6 +928,7 @@ def calc_stats_CPI(root_node, concentration_function=gini):
         else:
             df = pd.DataFrame(data=node.cpi_data, columns=[f"F{i}" for i in range(node.cpi_data.shape[1])])
             df = df.dropna(axis=1, how='all')
+            n_features_cpi.append(df.shape[1])
 
             resulting_labels.append(labels)
             samples.append(len(node.cpi_data))
@@ -920,7 +946,8 @@ def calc_stats_CPI(root_node, concentration_function=gini):
 
     n_samples = sum(samples) / len(samples)
 
-    return cpi_cm_value, n_classes_per_group, n_samples, sum(missing_values) / len(missing_values)
+    return cpi_cm_value, n_classes_per_group, n_samples, sum(missing_values) / len(missing_values), \
+           sum(n_features_cpi)/len(n_features_cpi), cpi_count
 
 
 def run_baseline_rf(df_train, df_test):
@@ -956,7 +983,25 @@ def run_baseline_rf(df_train, df_test):
     # check if predicted == equal
     df_test["accuracy"] = (df_test["predicted"] == df_test["target"])
     df_test["accuracy"] = df_test["accuracy"].astype(int)
-    # df_test["equal"] = df_test.apply(lambda row: int(row["equal"]), axis=1)
+    probabilities = rf.predict_proba(X_test)
+    classes = rf.classes_
+
+    # sort probabilities, together with classes so the order is the same!
+    probabilities_classes_sorted = [sorted(list(zip(probs, classes)), key=lambda tup: tup[0], reverse=True) for probs in
+                                    probabilities]
+
+    print(probabilities_classes_sorted)
+    print(len(probabilities_classes_sorted))
+    # list of classes
+    result_list = [[x_[1] for x_ in x] for x in probabilities_classes_sorted]
+    print(result_list)
+    print(len(result_list))
+    df_test["Avg A@e"] = [0 if y not in result[0:10] else (10 - np.where(result[0:10] ==y)[0])/10 for result, y in zip(result_list, y_test)]
+    df_test["Avg A@e"] = df_test["Avg A@e"].apply(lambda x: x if isinstance(x, int) else x[0])
+    print(df_test["Avg A@e"])
+    print(df_test['Avg A@e'].unique())
+    print(df_test["Avg A@e"].max())
+    print(df_test["Avg A@e"].dtype)
 
     acc_per_group_df = pd.DataFrame()
     if os.path.isfile("acc_per_group.csv"):
@@ -966,6 +1011,7 @@ def run_baseline_rf(df_train, df_test):
     print("accuracy per group:")
 
     accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
+    print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
 
     group_counts = df_train['group'].value_counts()
@@ -974,6 +1020,7 @@ def run_baseline_rf(df_train, df_test):
     accuracy_per_group = accuracy_per_group.reset_index()
     accuracy_per_group['train count'] = accuracy_per_group['group'].apply(lambda g: group_counts[g])
     accuracy_per_group['test count'] = accuracy_per_group['group'].apply(lambda g: group_counts_test[g])
+    accuracy_per_group['Avg A@e'] = df_test.groupby(['group'])["Avg A@e"].mean().reset_index()['Avg A@e']
 
     accuracy_per_group['samples per class'] = accuracy_per_group['group'].apply(lambda g: sample_per_class[g])
     accuracy_per_group['n_classes'] = accuracy_per_group['train count'] / accuracy_per_group['samples per class']
@@ -981,7 +1028,6 @@ def run_baseline_rf(df_train, df_test):
     accuracy_per_group = accuracy_per_group.sort_values(["group"])
 
     print(accuracy_per_group)
-
     accuracy_per_group["Method"] = "RF+B"
     accuracy_per_group["imbalance"] = imbalance_degree
     accuracy_per_group["p"] = -1
@@ -990,8 +1036,7 @@ def run_baseline_rf(df_train, df_test):
 
     acc_per_group_df = pd.concat([accuracy_per_group, acc_per_group_df])
     acc_per_group_df.to_csv("acc_per_group.csv", sep=';', decimal=',', index=False)
-    df_test = df_test.drop(['accuracy'], axis='columns')
-    df_test = df_test.drop(['predicted'], axis='columns')
+    df_test = df_test.drop(['accuracy', 'predicted', 'Avg A@e'], axis='columns')
     print("--------------------------------------------------------------------------------------------------------")
     ###################################################################################################
     return rf_df, acc_e
@@ -1065,6 +1110,8 @@ def run_cpi_in_isolation(X_train, y_train, X_test, y_test, concentration_functio
         cpi_isolation_accuracy_df = rf_df
 
     cpi_isolation_accuracy_df['Method'] = 'CPI'
+    cpi_isolation_accuracy_df['gini'] = cm_val
+    cpi_isolation_accuracy_df['p value'] = p_val
     return cpi_isolation_accuracy_df
 
 
@@ -1200,19 +1247,6 @@ if __name__ == '__main__':
         # resulting dataframe
         result_df = pd.DataFrame()
 
-        ##############################################################################
-        ################ Setting up output directories based on imbalance degree ####
-        # Default for directories
-        data_output_directory = f"imbalance_degree/{imbalance_degree}/data_split"
-        result_output_directory = f"imbalance_degree/{imbalance_degree}/result_split"
-
-        if not os.path.exists(data_output_directory):
-            os.makedirs(data_output_directory)
-
-        if not os.path.exists(result_output_directory):
-            os.makedirs(result_output_directory)
-        ##############################################################################
-
         for run_id in runs:
             # for different runs, we use different random seeds
             np.random.seed(run_id * 5)
@@ -1221,6 +1255,21 @@ if __name__ == '__main__':
             runs_data['run_id'].append(run_id)
 
             for max_info_loss in max_info_loss_values:
+                ##############################################################################################
+                ################ Setting up output directories based on imbalance degree and max_info_loss####
+
+                # Default for directories
+                output_directory = f"imbalance_degree/{imbalance_degree}/maxinfoloss_{max_info_loss}"
+                data_output_directory = f"{output_directory}/data_split"
+                result_output_directory = f"{output_directory}/result_split"
+
+                if not os.path.exists(data_output_directory):
+                    os.makedirs(data_output_directory)
+
+                if not os.path.exists(result_output_directory):
+                    os.makedirs(result_output_directory)
+                ##############################################################################################
+
                 print(
                     "-------------------------------------------------------------------------------------------------------------------")
                 print(
@@ -1304,7 +1353,7 @@ if __name__ == '__main__':
 
                     print(f'executed sph: {sph_executed}')
                     sph_acc, sph_df = calculate_sph_accuracy(resulting_nodes_per_node_id)
-                    sph_cm_value, sph_n_classes, sph_n_samples, sph_missing = calc_stats_SPH(root_node,
+                    sph_cm_value, sph_n_classes, sph_n_samples, sph_missing, sph_n_features = calc_stats_SPH(root_node,
                                                                                              concentration_function)
 
                     sph_A_at_one = sph_acc[1]
@@ -1320,6 +1369,10 @@ if __name__ == '__main__':
                     print(f"--------Missing Values")
                     print(f"    for whole dataset: {missing_whole_data}")
                     print(f"    for SPH: {float(sph_missing)}")
+
+                    print(f"--------Features")
+                    print(f"    for whole dataset: {n_features}")
+                    print(f"    for SPH: {sph_n_features}")
 
                     print(f"--------{concentration_measure} index")
                     print(f"    for whole dataset: {cm_index}")
@@ -1418,8 +1471,8 @@ if __name__ == '__main__':
                     #plot_accuracy_result()
                     ################################################################################
 
-                    cpi_cm_value, cpi_n_classes, cpi_n_samples, cpi_missing_values = calc_stats_CPI(root_node,
-                                                                                                    concentration_function)
+                    cpi_cm_value, cpi_n_classes, cpi_n_samples, cpi_missing_values, n_features_cpi, cpi_count\
+                        = calc_stats_CPI(root_node,concentration_function)
 
                     statistics = {
                         f"CM Index": [concentration_measure],
@@ -1432,7 +1485,9 @@ if __name__ == '__main__':
                         "Missing": [missing_whole_data], "Missing SPH": [float(sph_missing)],
                         "Missing CPI": [float(cpi_missing_values)],
                         "#Classes": [n_classes], "#Classes SPH": [sph_n_classes], "#Classes CPI": [cpi_n_classes],
-                        "#Samples": [n_samples], "#Samples SPH": [sph_n_samples], "#Samples CPI": [cpi_n_samples]
+                        "#Samples": [n_samples], "#Samples SPH": [sph_n_samples], "#Samples CPI": [cpi_n_samples],
+                        "#Features": [n_features], "#Features SPH": [sph_n_features], "#Features CPI": [n_features_cpi],
+                        "SPH executed": [sph_executed], "CPI executed": [cpi_count]
                     }
 
                     stats_df = pd.concat([stats_df, pd.DataFrame(data=statistics)])
@@ -1523,22 +1578,25 @@ if __name__ == '__main__':
                         # plot_accuracy_result()
                         ################################################################################
 
-                        cpi_cm_value, cpi_n_classes, cpi_n_samples, cpi_missing_values = calc_stats_CPI(root_node,
-                                                                                                        concentration_function)
+                        cpi_cm_value, cpi_n_classes, cpi_n_samples, cpi_missing_values, n_features_cpi, cpi_count\
+                            = calc_stats_CPI(root_node,concentration_function)
                         missing_whole_data = float(missing_value_df.mean(axis=0))
 
                         statistics = {
                             f"CM Index": [concentration_measure],
                             f"{concentration_measure}_parameter": [cm_val],
                             "p_parameter": [p_val],
-                            f"Training {concentration_measure}": [training_data_gini],
                             concentration_measure: [cm_index],
+                            f"Training {concentration_measure}": [training_data_gini],
                             f"{concentration_measure} SPH": [sph_cm_value],
                             f"{concentration_measure} CPI": [cpi_cm_value],
                             "Missing": [missing_whole_data], "Missing SPH": [float(sph_missing)],
                             "Missing CPI": [float(cpi_missing_values)],
                             "#Classes": [n_classes], "#Classes SPH": [sph_n_classes], "#Classes CPI": [cpi_n_classes],
-                            "#Samples": [n_samples], "#Samples SPH": [sph_n_samples], "#Samples CPI": [cpi_n_samples]
+                            "#Samples": [n_samples], "#Samples SPH": [sph_n_samples], "#Samples CPI": [cpi_n_samples],
+                            "#Features": [n_features], "#Features SPH": [sph_n_features],
+                            "#Features CPI": [n_features_cpi],
+                            "SPH executed": [sph_executed], "CPI executed": [cpi_count]
                         }
 
                         stats_df = pd.concat([stats_df, pd.DataFrame(data=statistics)])
