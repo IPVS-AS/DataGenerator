@@ -14,8 +14,8 @@ from sklearn.impute import KNNImputer
 from Hierarchy import Node, HardCodedHierarchy
 import concentrationMetrics as cm
 
-random_state = np.random.seed(1)
-random.seed(1)
+#np.random.seed(1)
+#random.seed(1)
 
 
 def _check_groups_samples_classes(n_groups, n_samples_per_group, n_classes_per_group):
@@ -53,7 +53,9 @@ class ImbalanceGenerator:
 
     def generate_data_with_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
                                              features_remove_percent=0.2, imbalance_degree="normal",
-                                             root=HardCodedHierarchy().create_hardcoded_hierarchy(), seed=random_state):
+                                             root=HardCodedHierarchy().create_hardcoded_hierarchy(), noise=0,
+                                             #, seed=random_state
+                                             ):
 
         """
         Main method of Data generation.
@@ -75,25 +77,30 @@ class ImbalanceGenerator:
         The data is encoded via the feature columns F_0, ..., F_n_features.
         The hierarchy is implcitly given through the specific attributes that represent the hierarchy.
         """
+
+        #np.random.seed(1)
         if root:
             # we have a hierarchy given, so we use this hierarchy
             return self._generate_product_hierarchy_from_specification(root=root, n_features=n_features,
                                                                        n_samples_total=n_samples_total,
                                                                        features_remove_percent=features_remove_percent,
-                                                                       n_classes=total_n_classes, seed=seed,
-                                                                       imbalance_degree=imbalance_degree)
+                                                                       n_classes=total_n_classes,
+                                                                       imbalance_degree=imbalance_degree, noise=noise)
         else:
             return self._generate_default_product_hierarchy(n_features=n_features, n_samples_total=n_samples_total,
                                                             total_n_classes=total_n_classes,
                                                             imbalance_degree=imbalance_degree,
                                                             features_remove_percent=features_remove_percent,
-                                                            n_levels=n_levels, seed=seed)
+                                                            n_levels=n_levels)
 
     def _generate_product_hierarchy_from_specification(self, root=HardCodedHierarchy().create_hardcoded_hierarchy(),
                                                        n_features=100,
                                                        n_samples_total=1050, n_classes=84, features_remove_percent=0.2,
-                                                       imbalance_degree="normal", seed=random_state):
-        np.random.seed(seed)
+                                                       imbalance_degree="normal",
+                                                       noise=0,
+                                                       #seed=random_state
+                                                       ):
+        #np.random.seed(seed)
         if imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {imbalance_degree}")
@@ -182,7 +189,7 @@ class ImbalanceGenerator:
 
         # Now, we generate the actual data for the groups!
         groups = self._generate_product_groups_from_hierarchy(group_nodes_to_create, n_classes,
-                                                              imbalance_degree=imbalance_degree)
+                                                              imbalance_degree=imbalance_degree, noise=noise)
 
         dfs = []
         levels = list(range(n_levels - 1))
@@ -208,7 +215,9 @@ class ImbalanceGenerator:
         return pd.concat(dfs).reset_index()
 
     def _generate_default_product_hierarchy(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                                            features_remove_percent=0.2, imbalance_degree="normal", seed=random_state):
+                                            features_remove_percent=0.2, imbalance_degree="normal",
+                                            #seed=random_state
+                                            ):
         """
         Generate specification on its own with "default" settings. Here, no hierarchy needs to be passed at all.
         This is mainly for future work to have a more generic data generator that does not require to have a specific
@@ -224,8 +233,6 @@ class ImbalanceGenerator:
         :param features_remove_percent:
         :return:
         """
-
-        np.random.seed(random_state)
 
         # Basic idea is to first specify features, classes and samples for each node on each level
         # Second, the nodes are created based on the specification
@@ -527,6 +534,7 @@ class ImbalanceGenerator:
             # Define noise to use --> only use if more than 30 samples in the group
             if noise > 0 and n_samples > 30:
                 y_noise = flip_labels_uniform(y, noise)
+
             created_classes = len(np.unique(y))
             created_samples = X.shape[0]
 
@@ -573,6 +581,11 @@ class ImbalanceGenerator:
             class_counter = Counter(y)
             group.class_counter = class_counter
             group.gini = self.gini(y)
+
+            if noise > 0 and n_samples > 30:
+                group.noisy_target = y_noise
+            else:
+                group.noisy_target = y
 
             # add data and labels to parent nodes as well
             traverse_node = group
@@ -732,6 +745,23 @@ if __name__ == '__main__':
         class_frequencies = np.array(list(Counter(x).values()))
         return my_index.gini(class_frequencies)
 
+
+    print('----------------------------------------------------------------------------------------')
+    print('------------------------------Example with noisy Data --------------------------------')
+
+    generator = ImbalanceGenerator()
+    # of course this also works with different noise levels and different imbalance degrees
+    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.1)
+    root = generator.root
+    y_true = df['target'].to_numpy()
+    gini_value = gini(y_true)
+    # Render the hierarchy
+    print(RenderTree(root))
+    # noisy labels
+    print(df['noisy target'])
+    # actual labels
+    print(df['target'])
+    print('----------------------------------------------------------------------------------------')
 
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Very Low Imbalance Degree --------------------------------')
