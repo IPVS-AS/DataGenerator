@@ -203,6 +203,9 @@ class ImbalanceGenerator:
             df = pd.DataFrame(group.data, columns=features_names)
             # assign classes and groups
             df["target"] = group.target
+
+            y_noise = flip_labels_uniform(np.array(group.target), noise, exact=True)
+            group.noisy_target = y_noise
             df["noisy target"] = group.noisy_target
 
             df["group"] = group.node_id
@@ -531,10 +534,6 @@ class ImbalanceGenerator:
                                        # scale=random.random()
                                        )
 
-            # Define noise to use --> only use if more than 30 samples in the group
-            if noise > 0 and n_samples > 30:
-                y_noise = flip_labels_uniform(y, noise)
-
             created_classes = len(np.unique(y))
             created_samples = X.shape[0]
 
@@ -581,11 +580,6 @@ class ImbalanceGenerator:
             class_counter = Counter(y)
             group.class_counter = class_counter
             group.gini = self.gini(y)
-
-            if noise > 0 and n_samples > 30:
-                group.noisy_target = y_noise
-            else:
-                group.noisy_target = y
 
             # add data and labels to parent nodes as well
             traverse_node = group
@@ -751,14 +745,17 @@ if __name__ == '__main__':
 
     generator = ImbalanceGenerator()
     # of course this also works with different noise levels and different imbalance degrees
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.1)
+    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.3)
     root = generator.root
     y_true = df['target'].to_numpy()
+    y_nois = df['noisy target']
+    noisyCount = np.count_nonzero((y_true == y_nois) == False)
+
+    print(noisyCount)
     gini_value = gini(y_true)
     # Render the hierarchy
     print(RenderTree(root))
     # noisy labels
-    print(df['noisy target'])
     # actual labels
     print(df['target'])
     print('----------------------------------------------------------------------------------------')
