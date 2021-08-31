@@ -3,6 +3,7 @@ import random
 from collections import Counter
 from typing import List
 
+import imblearn
 from anytree import RenderTree
 from skclean.simulate_noise import flip_labels_uniform
 from sklearn.datasets import make_classification, make_blobs
@@ -10,6 +11,7 @@ from sklearn.datasets import make_classification, make_blobs
 import numpy as np
 import pandas as pd
 from sklearn.impute import KNNImputer
+from sklearn.model_selection import train_test_split
 
 from Hierarchy import Node, HardCodedHierarchy
 import concentrationMetrics as cm
@@ -581,6 +583,11 @@ class ImbalanceGenerator:
             group.class_counter = class_counter
             group.gini = self.gini(y)
 
+            if noise > 0 and n_samples > 30:
+                group.noisy_target = flip_labels_uniform(np.array(y), noise)
+            else:
+                group.noisy_target = y
+
             # add data and labels to parent nodes as well
             traverse_node = group
             while traverse_node.parent:
@@ -593,7 +600,7 @@ class ImbalanceGenerator:
                 else:
                     traverse_node.data = X_with_NaNs
                     traverse_node.target = y
-                traverse_node.gini = self.gini(traverse_node.target)
+                traverse_node.gini_index = self.gini(traverse_node.target)
 
             resulting_groups.append(X)
             target_classes.extend(y)
@@ -763,13 +770,124 @@ if __name__ == '__main__':
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Very Low Imbalance Degree --------------------------------')
 
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="very_low")
-    root = generator.root
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
-    print(RenderTree(root))
-    print(f'Gini index for whole data is: {gini_value}')
+
+    def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
+        """
+        Performs our custom train test splitting.
+        This highly affects the accuracy of this approach.
+
+        :param df: Dataframe of the whole data.
+        :param n_train_samples: number of samples to use for training
+        :param at_least_two_samples: check if we should have at least one sample in the training data for each group.
+        :return: train, test: dataframes that contain training and test data.
+        """
+        # split in 750 training samples
+        # 300 test samples
+        train_percent = n_train_samples / len(df)
+
+        n_classes = len(np.unique(df["target"].to_numpy()))
+
+        counter = Counter(df["target"].to_numpy())
+        counter_one = {t: counter[t] for t in counter.keys() if counter[t] == 1}
+        print(f"number of classes that have only one sample: {counter_one}")
+        # split with stratify such that each class occurs in train and test set
+        train, test = train_test_split(df, train_size=train_percent, random_state=1234,
+                                       stratify=df["target"]
+                                       )
+        n_not_in_train = 1
+
+        while at_least_two_samples and n_not_in_train > 0:
+            test['freq'] = test.groupby('group')['target'].transform('count')
+            train['freq'] = train.groupby('group')['target'].transform('count')
+
+            print(f"Test data contains: {Counter(zip(test['target'].to_numpy(), test['group'].values))}")
+            # check which classes occur once and do not occur on training data!
+            # Use counter for this of group and target, in both training and test set
+            train_counter = Counter(zip(train['target'].to_numpy(), train['group'].values))
+
+            print(f"test of length before: {len(test)}")
+            # mark which ones occur not in training set (group and target) but occur in test set
+            test['marker'] = test.apply(lambda row: train_counter[(row['target'], row['group'])] == 0, axis=1)
+            test_in_train = test[~test['marker']]
+            test_not_in_train = test[test['marker']]
+            print(f"length of test afterwards: {len(test_in_train)}")
+
+            n_not_in_train = len(test_not_in_train)
+            print(n_not_in_train)
+
+            # check if there is still a class that occurs in test but not in training
+            if n_not_in_train > 0:
+                # if yes, replace these samples with random samples from training set
+                print(f"Classes that occur once in test but not in training data: {n_not_in_train}")
+                """
+                Todo: If we want to get more frequent classes  
+                probability = [x['freq'] for i,x in train.iterrows()]
+                print(probability)
+                sum_prob = sum(probability)
+                probability = [p/sum_prob for p in probability]
+                """
+                drop_indices = np.random.choice(train.index, n_not_in_train,
+                                                # p=probability
+                                                )
+                train_subset = train.loc[drop_indices]
+                train = train.drop(drop_indices)
+
+                train = train.append(test_not_in_train)
+                test = test_in_train.append(train_subset)
+
+            test = test.drop(['freq'], axis=1)
+            test = test.drop(['marker'], axis=1)
+            # test = test.drop(['predicted'], axis=1)
+
+            train = train.drop(['freq'], axis=1)
+            # train = train.drop(['predicted'], axis=1)
+
+        y_train_classes = len(np.unique(train["target"].to_numpy()))
+        y_test_classes = len(np.unique(test["target"].to_numpy()))
+
+        print(y_train_classes)
+        print(y_test_classes)
+        # make sure train_classes = test_classes = n_classes
+        if y_test_classes < n_classes:
+            print(
+                f"Classes that do not occur in test set: {[x for x in range(84) if x not in test['target'].to_numpy()]}")
+        #    assert y_test_classes == n_classes and y_train_classes == n_classes
+        # if len(test[test['freq'] == 1]) == 0:
+        return train, test
+
+
+    np.random.seed(10 * 5)
+    random.seed(10 * 10)
+    imb_to_one_sample_class = {}
+    imb_to_one_sample_count = {imb: 0 for imb in ImbalanceGenerator.imbalance_degrees}
+
+    for imb in ImbalanceGenerator.imbalance_degrees:
+        generator = ImbalanceGenerator()
+        df = generator.generate_data_with_product_hierarchy(imbalance_degree=imb)
+        root = generator.root
+        y_true = df['target'].to_numpy()
+        gini_value = gini(y_true)
+        print(RenderTree(root))
+        print(f'Gini index for whole data is: {gini_value}')
+        df, _ = train_test_splitting(df, n_train_samples=750)
+
+        average_one_samples = 0
+        for group in df['group'].unique():
+            group_targets = df[df['group'] == group]['target'].value_counts()
+            group_targets_dic = dict(group_targets)
+            print(group_targets_dic)
+            group_targets_dic = {k: v for k,v in group_targets_dic.items() if v==1}
+
+            average_one_samples += len(group_targets_dic) / sum(group_targets)
+            imb_to_one_sample_count[imb] += len(group_targets_dic) /len(group_targets)
+
+        average_one_samples = average_one_samples / len(df['group'].unique())
+        imb_to_one_sample_class[imb] = average_one_samples
+
+    print(imb_to_one_sample_count)
+    print(imb_to_one_sample_class)
+
+    exit()
     print('----------------------------------------------------------------------------------------')
 
     print('----------------------------------------------------------------------------------------')
