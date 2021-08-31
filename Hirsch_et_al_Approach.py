@@ -8,7 +8,7 @@ from anytree import PreOrderIter, RenderTree
 from boruta import BorutaPy
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.impute import KNNImputer
-from sklearn.metrics import jaccard_score, accuracy_score
+from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score
 from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
 
@@ -25,7 +25,6 @@ np.random.seed(5)
 random_forest_parameters = {'random_state': 1234, 'n_estimators': 200,
                             # 'n_jobs': -1
                             }
-
 
 def theil(x):
     my_index = cm.Index()
@@ -467,7 +466,7 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     print(f"number of classes that have only one sample: {counter_one}")
     # split with stratify such that each class occurs in train and test set
     train, test = train_test_split(df, train_size=train_percent, random_state=1234,
-                                   stratify=df["target"]
+                                   #stratify=df["target"]
                                    )
     n_not_in_train = 1
 
@@ -570,7 +569,8 @@ def update_data_and_training_data(root_node, df_train, data_df, n_features=100):
 
 def create_ensemble(cpi_partitions):
     model_repository = {}
-    # use random forest on product groups
+
+    # train random forest+KNN on product groups
     for key, node in cpi_partitions.items():
 
         if len(node.cpi_data) == 2 and isinstance(node.cpi_data, tuple):
@@ -635,10 +635,10 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
             max_majority = max(majority_probas)
             # print(f"For target class {y_target} the maximum is")
             if max_minority > max_majority:
-                predicted_label = minority_clf.predict(sample)
+                predicted_label = minority_clf.predict(sample, )
                 # print(f"minority with {max_minority} and predicted {predicted_label}")
             else:
-                predicted_label = majority_clf.predict(sample)
+                predicted_label = majority_clf.predict(sample, )
                 # print(f"minority with {max_majority} and predicted {predicted_label}")
 
             predicted_probabilities.append({"minority_probabilities": minority_probas,
@@ -651,7 +651,7 @@ def classifiy_new_samples(model_repo, test_data_df, n_features=100, method="SPH+
         else:
 
             probabilities = clf.predict_proba(sample)[0]
-            predicted_label = clf.predict(sample)
+            predicted_label = clf.predict(sample, )
             predicted_labels.append(predicted_label[0])
             predicted_probabilities.append(
                 {"probabilities": probabilities, "classes": clf["forest"].classes_, "target": y_target,
@@ -738,8 +738,26 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
     df_test["Avg A@e"] = [
         0 if result['target'] not in result["classes"][0:10] else (10 - result["classes"].index(result['target'])) / 10
         for result in result_list]
-    print(df_test["Avg A@e"].max())
-    print(df_test["Avg A@e"].min())
+    df_test["A@10"] = [1 if result['target'] in result["classes"][0:10] else 0 for result in result_list]
+
+    df_test["RA@10"] = [result["classes"].index(result['target']) + 1 if result['target'] in result["classes"][0:10]
+                        else 0 for result in result_list]
+
+    rw_df = df_test[["group", "target", "RA@10"]]
+    rw_df["gini"] = -1 if method == "SPH" else cm_val
+    rw_df["p"]  = -1 if method == "SPH" else  p_val
+    rw_df["max info loss"] = max_info_loss
+    rw_df["Method"] = method
+    rw_df["imb"] = imbalance_degree
+    print(rw_df)
+    if os.path.isfile("rework_attemps_per_group.csv"):
+        rw_df = pd.concat([pd.read_csv("rework_attemps_per_group.csv", sep=';', decimal=',', index_col=None),
+                                      rw_df])
+    rw_df.to_csv('rework_attemps_per_group.csv', sep=';', decimal=',')
+
+    print(df_test["A@10"].max())
+    print(df_test["A@10"].min())
+    print(df_test["A@10"].mean())
 
     print("------------------------------------------------------")
     print(f"Mean Accuracy for {method} is:")
@@ -748,6 +766,7 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
 
     acc_per_group_df = pd.DataFrame()
     acc_per_target_df = pd.DataFrame()
+
     if os.path.isfile("acc_per_group.csv"):
         acc_per_group_df = pd.concat([pd.read_csv("acc_per_group.csv", sep=';', decimal=',', index_col=None),
                                       acc_per_group_df])
@@ -758,12 +777,12 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
     print("--------------------------------------------------------------------------------------------------------")
     print("accuracy per group:")
 
-    accuracy_per_group = df_test.groupby(['group'])["accuracy", "Avg A@e"].mean()
+    accuracy_per_group = df_test.groupby(['group'])["accuracy", "Avg A@e", "A@10"].mean()
     print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
     count_target_per_group = pd.concat([df_train, df_test]).value_counts(['group', 'target'])
 
-    accuracy_per_target = df_test.groupby(['group', 'target'])["accuracy", "Avg A@e"].mean()
+    accuracy_per_target = df_test.groupby(['group', 'target'])["accuracy", "Avg A@e", "A@10"].mean()
     accuracy_per_target = accuracy_per_target.reset_index()
 
     accuracy_per_target["Method"] = method
@@ -789,8 +808,6 @@ def obtain_ranked_list_R(predicted_probabilities, method="SPH+CPI"):
     accuracy_per_group['samples per class'] = accuracy_per_group['group'].apply(lambda g: sample_per_class[g])
     accuracy_per_group['n_classes'] = accuracy_per_group['train count'] / accuracy_per_group['samples per class']
     accuracy_per_group = accuracy_per_group.sort_values(["group"])
-
-    print(accuracy_per_group)
 
     accuracy_per_group["Method"] = method
     accuracy_per_group["imbalance"] = imbalance_degree
@@ -836,9 +853,9 @@ def accuracy_for_e(ranked_list, e=10):
     print(correct_position_per_e)
     rework_attempt_per_e = {}
     rework_attempt_per_e[1] = correct_position_per_e[1]
+
     for i in range(2, e + 1):
-        # multiply number of correctly classified times i.
-        # Substract the the ones that were classified correctly before
+        # sum of correct position multiplied with the position. At the end divided by the sum of all correctly classified
         rework_attempt_per_e[i] = sum([correct_position_per_e[j] * j for j in range(1, i + 1)]) / \
                                   correctly_classified_per_e[i]
     rework_attempt_per_e[1] = 1
@@ -846,7 +863,7 @@ def accuracy_for_e(ranked_list, e=10):
 
     accuracy_per_e = {i: correctly_classified_per_e[i] / len(ranked_list) for i in range(1, e + 1)}
     print(rework_attempt_per_e)
-    
+
     result_dic = {"R_e": list(range(1, e + 1)), "A@e": [accuracy_per_e[i] for i in range(1, e + 1)],
                   "Method": ["Tailored Approach" for x in range(1, e + 1)],
                   "RA@e": [rework_attempt_per_e[i] for i in range(1, e + 1)]}
@@ -870,6 +887,9 @@ def accuracy_e_baselines(clf, X_test, y_test, e=10, method="RF+B"):
         # now we have probabilities for one test sample
         class_predicted = False
         for ind, (prob, cls) in enumerate(probs_classes):
+            if ind >= e:
+                break
+
             if cls == y_true:
                 class_predicted = True
                 correct_position_per_e[ind + 1] += 1
@@ -1000,7 +1020,8 @@ def run_baseline_rf(df_train, df_test):
     imp = KNNImputer(missing_values=np.nan)
     X_train = imp.fit_transform(X_train)
 
-    feat_selector = BorutaPy(rf, n_estimators='auto', max_iter=2, verbose=2, random_state=1)
+    # todo: Change back to 100
+    feat_selector = BorutaPy(rf, n_estimators='auto', max_iter=100, verbose=2, random_state=1)
     feat_selector.fit(X_train, y_train)
     X_train = feat_selector.transform(X_train, weak=True)
     # X_train = X_train[:, feat_selector.support_]
@@ -1036,6 +1057,21 @@ def run_baseline_rf(df_train, df_test):
     df_test["Avg A@e"] = [0 if y not in result[0:10] else (10 - np.where(result[0:10] == y)[0]) / 10 for result, y in
                           zip(result_list, y_test)]
     df_test["Avg A@e"] = df_test["Avg A@e"].apply(lambda x: x if isinstance(x, int) else x[0])
+    df_test["A@10"] = [1 if y in result[0:10] else 0 for result, y in zip(result_list, y_test)]
+
+    df_test["RA@10"] = [result.index(y) + 1 if y in result[0:10]
+                        else 0 for result, y in zip(result_list,y_test)]
+
+    rw_df = df_test[["group", "target", "RA@10"]]
+    rw_df["gini"] = -1
+    rw_df["p"]  = -1
+    rw_df["max info loss"] = -1
+    rw_df["imb"] = imbalance_degree
+    rw_df["Method"] = "RF+B"
+    if os.path.isfile("rework_attemps_per_group_rf.csv"):
+        rw_df = pd.concat([pd.read_csv("rework_attemps_per_group_rf.csv", sep=';', decimal=',', index_col=None),
+                                      rw_df])
+    rw_df.to_csv('rework_attemps_per_group_rf.csv', sep=';', decimal=',')
 
     acc_per_group_df = pd.DataFrame()
     if os.path.isfile("acc_per_group.csv"):
@@ -1044,7 +1080,7 @@ def run_baseline_rf(df_train, df_test):
     print("--------------------------------------------------------------------------------------------------------")
     print("accuracy per group:")
 
-    accuracy_per_group = df_test.groupby(['group'])["accuracy"].mean()
+    accuracy_per_group = df_test.groupby(['group'])["accuracy", "A@10"].mean()
     print(accuracy_per_group)
     sample_per_class = df_train.groupby(["group", "target"])["index"].count().groupby(['group']).mean()
 
@@ -1294,7 +1330,7 @@ if __name__ == '__main__':
             ##############################################################################################
             ################ Setting up output directories based on imbalance degree #####################
             # Default for directories
-            output_directory = f"imbalance_degree/{imbalance_degree}/"
+            output_directory = f"RA/imbalance_degree/{imbalance_degree}/"
             data_output_directory = f"{output_directory}/data_split"
             result_output_directory = f"{output_directory}/result_split"
 
@@ -1356,7 +1392,22 @@ if __name__ == '__main__':
                 print("--------------------------------------------------")
                 print("----------------Training Hierarchy----------------")
                 print(RenderTree(root_node))
-                # DotExporter(root_node, nodenamefunc= lambda n: n.node_id).to_picture("data/test.png")
+
+                """
+                # Counting the number of average classes with only one sample per group
+                result = 0
+                for group in df_train['group'].unique():
+                    group_targets = df_train[df_train['group'] == group]['target'].value_counts()
+                    group_targets_dic = dict(group_targets)
+                    group_targets_dic = {k: v for k, v in group_targets_dic.items() if v == 1}
+                    ones_count = len(group_targets_dic)
+                    result += ones_count
+                print("--------------------------------------------------")
+                print(f"Imbalance Degree: {imbalance_degree}")
+                print(f"Number of classes with one sample per group: {result/len(df_train['group'].unique())}")
+                print("--------------------------------------------------")
+                continue
+                """
 
             # Save training/test data and the hierarchy specification
             df_train.to_csv(f"{data_output_directory}/train_{generation_mechanism}_{run_id}.csv", index=False,
@@ -1444,7 +1495,6 @@ if __name__ == '__main__':
                 print(f"--------Accuracy")
                 print(f"    for RF+B: {acc_rf}")
                 print(f"    after SPH: {sph_acc}")
-
                 print("-----------------------")
 
                 # run baseline
@@ -1463,7 +1513,9 @@ if __name__ == '__main__':
                 rf_df[f"{concentration_measure}"] = -1
                 rf_df['p value'] = -1
                 rf_df["SPH Executed"] = sph_executed
-                result_df = pd.concat([result_df, sph_df, rf_df])
+                result_df = pd.concat([result_df, sph_df,
+                                       rf_df
+                                       ])
                 stats_df = pd.DataFrame()
 
                 """
@@ -1499,7 +1551,7 @@ if __name__ == '__main__':
                     vitali_df["p value"] = p_val
                     vitali_df["Run"] = run_id
                     vitali_df["SPH A@1"] = sph_A_at_one
-                    vitali_df["RF+B A@1"] = acc_rf[1]
+                    # vitali_df["RF+B A@1"] = acc_rf[1]
                     vitali_df["info loss"] = max_info_loss
 
                     vitali_df[concentration_measure] = cm_val
@@ -1561,8 +1613,9 @@ if __name__ == '__main__':
                     print(f"    after SPH: {sph_acc}")
 
                     print("-----------------------")
-                    # result_df.to_csv( f"{result_output_directory}/w_cpi_free_{concentration_measure}_accuracy_all_runs.csv",
-                    #                   index=False)
+                    result_df.to_csv(
+                        f"{result_output_directory}/w_cpi_free_{concentration_measure}_accuracy_all_runs.csv",
+                        index=False)
 
                 else:
 
@@ -1603,7 +1656,7 @@ if __name__ == '__main__':
                         vitali_df["p value"] = p_val
                         vitali_df["Run"] = run_id
                         vitali_df["SPH A@1"] = sph_A_at_one
-                        vitali_df["RF+B A@1"] = acc_rf[1]
+                        # vitali_df["RF+B A@1"] = acc_rf[1]
                         vitali_df["CPI A@1"] = cpi_isolation_df[cpi_isolation_df["R_e"] == 1]["A@e"].values[0]
                         vitali_df["info loss"] = max_info_loss
                         vitali_df[concentration_measure] = cm_val
@@ -1612,7 +1665,9 @@ if __name__ == '__main__':
                         vitali_df["Run"] = run_id
 
                         acc_values = list(acc_vitali.values())
+                        ra_values = list(vitali_df['RA@e'].values)
                         vitali_df["Avg Acc SPH+CPI"] = sum(acc_values) / len(acc_values)
+                        vitali_df["Avg RA"] = sum(ra_values) / len(ra_values)
                         result_df = pd.concat([result_df, vitali_df])
 
                         #####################plot ######################################################
