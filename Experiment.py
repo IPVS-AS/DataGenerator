@@ -15,15 +15,6 @@ from Utility import train_test_splitting, update_data_and_training_data
 from Hierarchy import HardCodedHierarchy
 
 
-def get_train_test_X_y(df_train, df_test, n_features=100):
-    X_train = df_train[[f"F{i}" for i in range(n_features)]].to_numpy()
-    y_train = df_train["target"].to_numpy()
-
-    X_test = df_test[[f"F{i}" for i in range(n_features)]].to_numpy()
-    y_test = df_test["target"].to_numpy()
-    return X_train, X_test, y_train, y_test
-
-
 def store_data_to_csv(df_train, df_test, data_output_directory):
     df_train.to_csv(data_output_directory + "/train.csv")
     df_test.to_csv(data_output_directory + "/test.csv")

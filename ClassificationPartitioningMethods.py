@@ -1,24 +1,25 @@
-import argparse
 import logging
-import os
 import random
-import warnings
+from abc import abstractmethod
 from collections import Counter
+from itertools import product
 
 from anytree import PreOrderIter
 from boruta import BorutaPy
+from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
 from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score
 import numpy as np
+from sklearn.mixture import GaussianMixture
 from sklearn.pipeline import Pipeline
 import concentrationMetrics as cm
 import pandas as pd
-from itertools import product
 
 from DataGenerator import ImbalanceGenerator
+from Utility import train_test_splitting
+from Utility import get_train_test_X_y
 from Hierarchy import HardCodedHierarchy
-from Hirsch_et_al_Approach import train_test_splitting, update_data_and_training_data
 
 random_forest_parameters = {'random_state': 1234, 'n_estimators': 200,
                             # 'n_jobs': -1
@@ -34,6 +35,7 @@ def gini(x):
 class StatisticTracker:
     """
     Tracks statistic about missing feautres, n_features, samples, and the gini index for each partition.
+    It is also used for getting the predictions, accuracy and rework attempts for each method.
     """
 
     def __init__(self):
@@ -162,18 +164,15 @@ class ClassificationMethod:
         self.stats_tracker = StatisticTracker()
         self.partitions_for_node = None
 
+    @abstractmethod
     def fit(self, X_train, y_train):
         pass
-
-    def predict(self, df_test, e=10):
-        accuracy_per_e = self.predict_test_samples(df_test, e=e)
-        self.stats_tracker.accuracy_per_e = accuracy_per_e
-        self.track_stats()
 
     @staticmethod
     def name():
         pass
 
+    @abstractmethod
     def predict_test_samples(self, df_test, e=10):
         """
         Should implement for each method how to predict the test samples.
@@ -733,3 +732,113 @@ class CPI(SPHandCPI):
     @staticmethod
     def name():
         return "CPI"
+
+
+nan_replacement = -0.0001
+class ClusteringClassification(ClassificationMethod):
+    def __init__(self, clustering_algorithm="KMeans", clustering_parameters={"n_clusters": 10}):
+        super(ClusteringClassification, self).__init__(partitioning=True, hierarchy_required=False)
+        if clustering_algorithm in CLUSTERING_MAP:
+            self.clustering_algorithm = CLUSTERING_MAP[clustering_algorithm]
+        self.clustering_name = clustering_algorithm
+        self.clustering_parameters = clustering_parameters
+
+    def fit(self, X_train, y_train):
+        self.partitions_for_node = self._run_clustering_algorithm(X_train, y_train)
+        self._build_model_repository(self.partitions_for_node)
+
+    def predict_test_samples(self, df_test, e=10):
+        pass
+
+    def _run_clustering_algorithm(self, X_train, y_train):
+        partitions_for_node = {}
+        # set value close to zero (we do not have negative values in the data but we have zeros)
+        X_train_zero = np.nan_to_num(X_train, nan=nan_replacement)
+        cluster_model = self.clustering_algorithm(**self.clustering_parameters)\
+            .fit(X_train_zero)
+        labels = cluster_model.predict(X_train_zero)
+        self.cluster_model = cluster_model
+
+        for cluster_id in np.unique(labels):
+            cluster_data = X_train[np.where(labels == cluster_id)]
+            cluster_class_labels = y_train[np.where(labels == cluster_id)]
+
+            partitions_for_node[cluster_id] = {"data": cluster_data, "labels": cluster_class_labels}
+        return partitions_for_node
+
+    def _build_model_repository(self, partitions_for_node):
+        self.model_repository = {}
+        for partition_id, partition in partitions_for_node.items():
+            X_partition = partition["data"]
+            y_partition = partition["labels"]
+
+            X_partition[ X_partition == nan_replacement] = np.NAN
+            clf_model = Pipeline([("imputer", KNNImputer(missing_values=np.nan)),
+                                      ("forest", RandomForestClassifier(**random_forest_parameters))])
+            clf_model = clf_model.fit(X_partition, y_partition)
+            print(f"Training RF on cluster {partition_id}")
+
+            self.model_repository[partition_id] = clf_model
+        print(self.model_repository)
+
+    def predict_test_samples(self, df_test: pd.DataFrame, e=10):
+        X_test = df_test[[f"F{i}" for i in range(100)]]
+        X_test = np.nan_to_num(X_test, nan=nan_replacement)
+        df_test["cluster_id"] = self.cluster_model.predict(X_test)
+
+        for cluster_id in df_test["cluster_id"].unique():
+            cluster_test_samples = df_test[df_test["cluster_id"] == cluster_id]
+            clf_model = self.model_repository[cluster_id]
+
+            cluster_test_data = cluster_test_samples[[f"F{i}" for i in range(100)]]
+            true_labels = cluster_test_samples["target"].to_numpy()
+            y_probas = clf_model.predict_proba(cluster_test_data)
+
+            self.stats_tracker.add_predictions(y_probas=y_probas, y_true=true_labels, class_labels=clf_model.classes_,
+                                               e=10, groups=cluster_test_samples["cluster_id"])
+
+    def name(self):
+        return f"{self.clustering_name}-{list(self.clustering_parameters.values())}"
+
+CLUSTERING_MAP = {
+    "KMeans": KMeans,
+    "GMM": GaussianMixture,
+}
+
+if __name__ == '__main__':
+    imbalance_degree = 'normal'
+    method_instance = ClusteringClassification()
+    np.random.seed(10)
+    random.seed(10)
+    data_df = ImbalanceGenerator().generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree)
+
+    methods_to_parameters = {
+        "KMeans": {"clustering_algorithm": ["KMeans"], "clustering_parameters": [{"n_clusters": 10}, {"n_clusters": 20}, {"n_clusters": 30},
+                                                        {"n_clusters": 40}, {"n_clusters": 50}]},
+        "GMM": {"clustering_algorithm": ["GMM"], "clustering_parameters": [{"n_components": 10}, {"n_components": 20}, {"n_components": 30},
+                                                        {"n_components": 40}, {"n_components": 50}]},
+    }
+
+    # Train/Test split and update data in the hierarchy
+    df_train, df_test = train_test_splitting(data_df)
+    #root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=100)
+    X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=100)
+
+    rf_instance = RandomForestClassMethod()
+    rf_instance.fit(X_train, y_train)
+    rf_instance.predict_test_samples(df_test)
+    clustering_df = rf_instance.get_accuracy_per_e_df(run_id=1)
+    print(clustering_df)
+    #clustering_df = pd.DataFrame()
+    for method in methods_to_parameters.keys():
+        parameter_dicts = methods_to_parameters[method]
+        for parameter_vals in product(*parameter_dicts.values()):
+            print(dict(zip(parameter_dicts, parameter_vals)))
+            method_instance = ClusteringClassification(**dict(zip(parameter_dicts, parameter_vals)))
+
+            method_instance.fit(X_train, y_train)
+            method_instance.predict_test_samples(df_test)
+            accuracy_df = method_instance.get_accuracy_per_e_df(run_id=1)
+            print(accuracy_df)
+            clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
+    clustering_df.to_csv("clustering.csv")
