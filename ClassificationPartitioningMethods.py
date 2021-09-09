@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 from abc import abstractmethod
 from collections import Counter
@@ -6,7 +7,7 @@ from itertools import product
 
 from anytree import PreOrderIter
 from boruta import BorutaPy
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, Birch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
 from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score
@@ -17,7 +18,7 @@ import concentrationMetrics as cm
 import pandas as pd
 
 from DataGenerator import ImbalanceGenerator
-from Utility import train_test_splitting
+from Utility import train_test_splitting, update_data_and_training_data
 from Utility import get_train_test_X_y
 from Hierarchy import HardCodedHierarchy
 
@@ -51,6 +52,9 @@ class StatisticTracker:
         # keep track of predictions, i.e., which sample with its group and class was predicted correctly at which position
         self.predictions = []
 
+        # keep track of surrogate sets for SPH/ SPH+CPI
+        self.surrogate_sets = []
+
     def track(self, partitions_for_node, partition):
         if not partition:
             # if not a partitioning approach, we model it as one partition
@@ -58,7 +62,7 @@ class StatisticTracker:
 
         # count number of partitions --> if we have a tuple we count the length of it!
         n_partitions = sum([len(x) if isinstance(x, tuple) else 1 for x in partitions_for_node.values()])
-
+        n_partitions = 0
         for partition_key, partition in partitions_for_node.items():
 
             # make partition iterable (list) so we can iterate over it if we have more partitions
@@ -68,6 +72,7 @@ class StatisticTracker:
                 partitions = partition
 
             for part in partitions:
+                n_partitions += 1
                 data = part["data"]
                 labels = part["labels"]
 
@@ -79,9 +84,9 @@ class StatisticTracker:
                     data = np.take(data, indices, axis=0)
                     labels = np.take(labels, indices, axis=0)
 
-                self.classes += len(np.unique(labels)) / n_partitions
+                self.classes += len(np.unique(labels))
                 gini_index = gini(labels)
-                self.gini_index += gini_index / n_partitions
+                self.gini_index += gini_index
 
                 df = pd.DataFrame(data=data, columns=[f"F{i}" for i in range(data.shape[1])])
                 df = df.dropna(axis=1, how='all')
@@ -90,9 +95,16 @@ class StatisticTracker:
                                                  'percent_missing': percent_missing})
 
                 missing = missing_value_df.mean(axis=0).values[0]
-                self.missing_features += missing / n_partitions
-                self.samples += data.shape[0] / n_partitions
-                self.features += df.shape[1] / n_partitions
+                self.missing_features += missing
+                self.samples += data.shape[0]
+                self.features += df.shape[1]
+
+        self.classes = self.classes / n_partitions
+        self.gini_index = self.gini_index / n_partitions
+        self.missing_features = self.missing_features / n_partitions
+        self.samples = self.samples/n_partitions
+        self.features = self.features / n_partitions
+
 
     def get_stats_df(self):
         return pd.DataFrame(data={
@@ -105,9 +117,7 @@ class StatisticTracker:
             "#CPI": [self.cpi_count]
         })
 
-    def add_predictions(self, y_probas, y_true, e, groups
-                        , class_labels
-                        ):
+    def add_predictions(self, y_probas, y_true, e, groups, class_labels):
         """
         Adds the current predictions to the prediction list.
         To this end, it adds an entry to a dictionary with the group and class of the sample
@@ -125,8 +135,6 @@ class StatisticTracker:
         best_e = class_labels[best_e]
 
         for top_e_pred, y, group in zip(best_e, y_true, groups):
-            print(y)
-            print(top_e_pred)
 
             # check for first occurence that the prediction equals the true y value
             correct_position = np.where(top_e_pred == y)[0]
@@ -146,6 +154,12 @@ class StatisticTracker:
 
     def get_predictions_df(self):
         return pd.DataFrame(data=self.predictions)
+
+    def add_surrogate_set(self, node_id):
+        self.surrogate_sets.append(node_id)
+
+    def get_surrogates_df(self):
+        return pd.DataFrame({"surrogate": self.surrogate_sets})
 
 
 class ClassificationMethod:
@@ -187,14 +201,6 @@ class ClassificationMethod:
     def track_stats(self):
         self.stats_tracker.track(self.partitions_for_node, partition=self.partitioning)
 
-    def get_stats_df(self, run_id=1):
-        stats_df = self.stats_tracker.get_stats_df()
-        for parameter_key, parameter_value in self.parameters.items():
-            stats_df[parameter_key] = parameter_value
-        stats_df["Method"] = self.name()
-        stats_df["Run"] = run_id
-        return stats_df
-
     def get_accuracy_per_e_df(self, run_id):
         """
         Returns a dataframe that contains the A@e and RA@e scores for this method.
@@ -227,11 +233,33 @@ class ClassificationMethod:
 
     def get_predictions_df(self, run_id=1):
         predictions_df = self.stats_tracker.get_predictions_df()
-        for parameter_key, parameter_value in self.parameters.items():
-            predictions_df[parameter_key] = parameter_value  #
-        predictions_df["Method"] = self.name()
-        predictions_df["Run"] = run_id
+        predictions_df = self._add_parameters_method_run(predictions_df, run_id)
         return predictions_df
+
+    def get_surrogates_df(self, run_id=1):
+        surrogates_df = self.stats_tracker.get_surrogates_df()
+        surrogates_df = self._add_parameters_method_run(surrogates_df, run_id)
+        return surrogates_df
+
+    def get_stats_df(self, run_id=1):
+        stats_df = self.stats_tracker.get_stats_df()
+        stats_df = self._add_parameters_method_run(stats_df, run_id)
+        return stats_df
+
+    def _add_parameters_method_run(self, df, run_id):
+        """
+        Adds parameters, method_name and the run_id for this method to any Dataframe.
+        Typically used as wrapper for statistics, predictions etc.
+
+        :param df: dataframe to append the values
+        :param run_id: id of the current run
+        :return: df with the parameters, Method and run_id as new columns and fixed values
+        """
+        for parameter_key, parameter_value in self.parameters.items():
+            df[parameter_key] = parameter_value
+        df["Method"] = self.name()
+        df["Run"] = run_id
+        return df
 
 
 class RandomForestClassMethod(ClassificationMethod):
@@ -330,6 +358,7 @@ class SPH(ClassificationMethod):
         self.max_info_loss = max_info_loss
         self.min_samples_per_class = min_samples_per_class
         self.parameters = {"max info loss": self.max_info_loss}
+        self.surrogate_sets = []
 
     def _run_sph(self):
         root_node = self.hierarchy
@@ -355,6 +384,8 @@ class SPH(ClassificationMethod):
                                                                                  self.max_info_loss)
                 if not check_passed:
                     sph_executed += 1
+                    self.stats_tracker.add_surrogate_set(traverse_node.node_id)
+
                 if not check_passed and traverse_node.parent:
                     print(f"Using surrogate for {traverse_node.node_id} with info loss {info_loss}")
                     traverse_node = traverse_node.parent
@@ -579,6 +610,12 @@ class SPHandCPI(SPH):
             # calculate q quantile of classes
             class_threshold = np.quantile(class_freq, self.p_threshold)
 
+            if len([label for label in partition_labels if class_counter[label] > class_threshold]) == 0:
+                print(f"class threshold before: {class_threshold}")
+                # class threhsold equals the maximum counter --> reduce it
+                class_threshold = class_threshold - 1
+                print(f"class threshold after: {class_threshold}")
+
             # divide according to q quantile value the partition into minority and majority samples
             minority_indices = [ind for ind, label in enumerate(partition_labels) if
                                 class_counter[label] <= class_threshold]
@@ -735,6 +772,8 @@ class CPI(SPHandCPI):
 
 
 nan_replacement = -0.0001
+
+
 class ClusteringClassification(ClassificationMethod):
     def __init__(self, clustering_algorithm="KMeans", clustering_parameters={"n_clusters": 10}):
         super(ClusteringClassification, self).__init__(partitioning=True, hierarchy_required=False)
@@ -742,19 +781,21 @@ class ClusteringClassification(ClassificationMethod):
             self.clustering_algorithm = CLUSTERING_MAP[clustering_algorithm]
         self.clustering_name = clustering_algorithm
         self.clustering_parameters = clustering_parameters
+        self.parameters.update(clustering_parameters)
+        self.parameters["algorithm"] = clustering_algorithm
+        print(self.parameters)
+        print(self.clustering_parameters)
 
     def fit(self, X_train, y_train):
         self.partitions_for_node = self._run_clustering_algorithm(X_train, y_train)
         self._build_model_repository(self.partitions_for_node)
-
-    def predict_test_samples(self, df_test, e=10):
-        pass
+        self.track_stats()
 
     def _run_clustering_algorithm(self, X_train, y_train):
         partitions_for_node = {}
         # set value close to zero (we do not have negative values in the data but we have zeros)
         X_train_zero = np.nan_to_num(X_train, nan=nan_replacement)
-        cluster_model = self.clustering_algorithm(**self.clustering_parameters)\
+        cluster_model = self.clustering_algorithm(**self.clustering_parameters) \
             .fit(X_train_zero)
         labels = cluster_model.predict(X_train_zero)
         self.cluster_model = cluster_model
@@ -772,9 +813,9 @@ class ClusteringClassification(ClassificationMethod):
             X_partition = partition["data"]
             y_partition = partition["labels"]
 
-            X_partition[ X_partition == nan_replacement] = np.NAN
+            X_partition[X_partition == nan_replacement] = np.NAN
             clf_model = Pipeline([("imputer", KNNImputer(missing_values=np.nan)),
-                                      ("forest", RandomForestClassifier(**random_forest_parameters))])
+                                  ("forest", RandomForestClassifier(**random_forest_parameters))])
             clf_model = clf_model.fit(X_partition, y_partition)
             print(f"Training RF on cluster {partition_id}")
 
@@ -797,48 +838,43 @@ class ClusteringClassification(ClassificationMethod):
             self.stats_tracker.add_predictions(y_probas=y_probas, y_true=true_labels, class_labels=clf_model.classes_,
                                                e=10, groups=cluster_test_samples["cluster_id"])
 
-    def name(self):
-        return f"{self.clustering_name}-{list(self.clustering_parameters.values())}"
+    @staticmethod
+    def name():
+        return f"Clustering"
+
+
+class KMeansClassification(ClusteringClassification):
+    def __init__(self, n_clusters):
+        super(KMeansClassification, self).__init__(clustering_algorithm="KMeans",
+                                                   clustering_parameters={"n_clusters": n_clusters})
+
+    @staticmethod
+    def name():
+        return "KMeans"
+
+
+class GMMClassification(ClusteringClassification):
+    def __init__(self, n_components):
+        super(GMMClassification, self).__init__(clustering_algorithm="GMM",
+                                                clustering_parameters={"n_components": n_components})
+
+    @staticmethod
+    def name():
+        return "GMM"
+
+
+class BirchClassification(ClusteringClassification):
+    def __init__(self, n_clusters):
+        super(BirchClassification, self).__init__(clustering_algorithm="Birch",
+                                                  clustering_parameters={"n_clusters": n_clusters})
+
+    @staticmethod
+    def name():
+        return "Birch"
+
 
 CLUSTERING_MAP = {
     "KMeans": KMeans,
     "GMM": GaussianMixture,
+    "Birch": Birch
 }
-
-if __name__ == '__main__':
-    imbalance_degree = 'normal'
-    method_instance = ClusteringClassification()
-    np.random.seed(10)
-    random.seed(10)
-    data_df = ImbalanceGenerator().generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree)
-
-    methods_to_parameters = {
-        "KMeans": {"clustering_algorithm": ["KMeans"], "clustering_parameters": [{"n_clusters": 10}, {"n_clusters": 20}, {"n_clusters": 30},
-                                                        {"n_clusters": 40}, {"n_clusters": 50}]},
-        "GMM": {"clustering_algorithm": ["GMM"], "clustering_parameters": [{"n_components": 10}, {"n_components": 20}, {"n_components": 30},
-                                                        {"n_components": 40}, {"n_components": 50}]},
-    }
-
-    # Train/Test split and update data in the hierarchy
-    df_train, df_test = train_test_splitting(data_df)
-    #root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=100)
-    X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=100)
-
-    rf_instance = RandomForestClassMethod()
-    rf_instance.fit(X_train, y_train)
-    rf_instance.predict_test_samples(df_test)
-    clustering_df = rf_instance.get_accuracy_per_e_df(run_id=1)
-    print(clustering_df)
-    #clustering_df = pd.DataFrame()
-    for method in methods_to_parameters.keys():
-        parameter_dicts = methods_to_parameters[method]
-        for parameter_vals in product(*parameter_dicts.values()):
-            print(dict(zip(parameter_dicts, parameter_vals)))
-            method_instance = ClusteringClassification(**dict(zip(parameter_dicts, parameter_vals)))
-
-            method_instance.fit(X_train, y_train)
-            method_instance.predict_test_samples(df_test)
-            accuracy_df = method_instance.get_accuracy_per_e_df(run_id=1)
-            print(accuracy_df)
-            clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
-    clustering_df.to_csv("clustering.csv")

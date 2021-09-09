@@ -6,3 +6,5 @@ anytree==2.8.0
 concentrationMetrics==0.5.1
 scikit_learn==0.24.2
 scikit-clean==0.1.2
+boruta==0.3
+imblearn
