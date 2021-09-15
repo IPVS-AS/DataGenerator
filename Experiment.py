@@ -11,15 +11,14 @@ import pandas as pd
 import numpy as np
 
 from DataGenerator import ImbalanceGenerator
-from ClassificationPartitioningMethods import ClusteringClassification
 
 from Utility import train_test_splitting, update_data_and_training_data, get_train_test_X_y
 from Hierarchy import HardCodedHierarchy
 
 
-def store_data_to_csv(df_train, df_test, data_output_directory):
-    df_train.to_csv(data_output_directory + "/train.csv")
-    df_test.to_csv(data_output_directory + "/test.csv")
+def store_data_to_csv(df_train, df_test, data_output_directory, run_id):
+    df_train.to_csv(data_output_directory + f"/train_{run_id}.csv")
+    df_test.to_csv(data_output_directory + f"/test_{run_id}.csv")
 
 
 def run_machine_learning(gini_thresholds: list,
@@ -39,7 +38,11 @@ def run_machine_learning(gini_thresholds: list,
         ##############################################################################################
         ################ Setting up output directories based on imbalance degree #####################
         # Default for directories, append the output_directory
-        output_directory = f"{output_directory}/imbalance_degree/{imbalance_degree}/"
+        if output_directory == "":
+            output_directory = f"imbalance_degree/{imbalance_degree}/"
+        else:
+            output_directory += f"{output_directory}/imbalance_degree/{imbalance_degree}/"
+
         data_output_directory = f"{output_directory}/data"
         result_output_directory = f"{output_directory}/result"
 
@@ -67,7 +70,7 @@ def run_machine_learning(gini_thresholds: list,
 
             # Train/Test split and update data in the hierarchy
             df_train, df_test = train_test_splitting(data_df)
-            store_data_to_csv(df_train, df_test, data_output_directory)
+            store_data_to_csv(df_train, df_test, data_output_directory, run_id)
             root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=100)
             X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=100)
 
