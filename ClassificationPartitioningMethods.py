@@ -10,7 +10,8 @@ from boruta import BorutaPy
 from sklearn.cluster import KMeans, Birch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
-from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score
+from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score, calinski_harabasz_score, \
+    v_measure_score
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from sklearn.pipeline import Pipeline
@@ -49,6 +50,12 @@ class StatisticTracker:
         self.sph_count = 0
         self.cpi_count = 0
 
+        self.calinski = 0
+        self.dbi = 0
+
+        self.v_measure = 0
+        self.avg_calinski = 0
+
         # keep track of predictions, i.e., which sample with its group and class was predicted correctly at which position
         self.predictions = []
 
@@ -63,6 +70,8 @@ class StatisticTracker:
         # count number of partitions --> if we have a tuple we count the length of it!
         n_partitions = sum([len(x) if isinstance(x, tuple) else 1 for x in partitions_for_node.values()])
         n_partitions = 0
+        avg_calinski = 0
+
         for partition_key, partition in partitions_for_node.items():
 
             # make partition iterable (list) so we can iterate over it if we have more partitions
@@ -71,10 +80,18 @@ class StatisticTracker:
             else:
                 partitions = partition
 
+            avg_vm = 0
             for part in partitions:
                 n_partitions += 1
                 data = part["data"]
                 labels = part["labels"]
+
+                # Example of CH score --> Can be modified for all metrics!
+                # Todo: What is a good/best way to do this???
+                X = KNNImputer().fit_transform(data)
+                ch_score = calinski_harabasz_score(X, labels)
+                print(ch_score)
+                avg_calinski += ch_score
 
                 if -1 in labels:
                     # there was OvA Binarization, do not use that for statistics
@@ -102,11 +119,14 @@ class StatisticTracker:
         self.classes = self.classes / n_partitions
         self.gini_index = self.gini_index / n_partitions
         self.missing_features = self.missing_features / n_partitions
-        self.samples = self.samples/n_partitions
+        self.samples = self.samples / n_partitions
         self.features = self.features / n_partitions
 
 
+        self.avg_calinski = avg_calinski / n_partitions
+
     def get_stats_df(self):
+        # Todo: Key-value dic, where value is function how to compute the stat?
         return pd.DataFrame(data={
             "#Samples": [self.samples],
             "missing": [self.missing_features],
@@ -114,7 +134,8 @@ class StatisticTracker:
             "#Classes": [self.classes],
             "Gini": [self.gini_index],
             "#SPH": [self.sph_count],
-            "#CPI": [self.cpi_count]
+            "#CPI": [self.cpi_count],
+            "CHI": [self.avg_calinski]
         })
 
     def add_predictions(self, y_probas, y_true, e, groups, class_labels):
@@ -523,6 +544,25 @@ class SPH(ClassificationMethod):
         return self.model_repository[group].predict_proba(sample_data)
 
 
+class RFperGroup(SPH):
+    """
+    We model RF per Group as SPH where the checks are always passed, i.e., we never go up in the hierarchy.
+    """
+
+    def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), partitioning=True):
+        super(RFperGroup, self).__init__(hierarchy=hierarchy, partitioning=partitioning,
+                                         max_info_loss=np.NAN  # We do not need this parameter for this method
+                                         )
+
+    def _SPH_checks(self, group_data, group_labels, min_samples_per_class=1, max_info_loss=0.25):
+        # Always check passed! I.e., we do not go higher!
+        return True, group_data, group_labels, 0
+
+    @staticmethod
+    def name():
+        return "RFperGroup"
+
+
 class SPHandCPI(SPH):
     def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), min_samples_per_class=1,
                  max_info_loss=0.25, p_threshold=0.8, gini_threshold=0.3, partitioning=True):
@@ -878,3 +918,102 @@ CLUSTERING_MAP = {
     "GMM": GaussianMixture,
     "Birch": Birch
 }
+
+if __name__ == '__main__':
+    gini_thresholds = [
+        0.3,
+        0.35,
+        0.4
+    ]
+
+    p_quantile = [
+        0.7,
+        0.75,
+        0.8,
+        0.85,
+        0.9
+    ]
+
+    max_info_loss_values = [
+        0.25, 0.3, 0.35,
+        0.4]
+
+    n_clusters_values = [10, 15, 20, 25, 26, 30, 35, 40, 45, 50]
+
+    METHODS = [
+        RFperGroup,
+        KMeansClassification,
+        BirchClassification,
+        GMMClassification,
+        SPH,
+        SPHandCPI,
+        # RandomForestClassMethod,
+        # RandomForestBorutaMethod,
+        # CPI,
+    ]
+
+    np.random.seed(10)
+    random.seed(10)
+
+    output_directoy = "clustering/"
+    imb_degrees = ImbalanceGenerator.imbalance_degrees
+
+    for imbalance_degree in imb_degrees:
+        # if not os.path.exists(output_directoy + f"{imbalance_degree})"):
+        #    os.makedirs(output_directoy + f"{imbalance_degree}")
+
+        generator = ImbalanceGenerator()
+        data_df = generator.generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree)
+        root_node = generator.root
+
+        methods_to_parameters = {
+            RFperGroup.name(): {"hierarchy": [root_node]},
+            RandomForestClassMethod.name(): {"classifier_params": [random_forest_parameters]},
+            RandomForestBorutaMethod.name(): {"classifier_params": [random_forest_parameters]},
+            KMeansClassification.name(): {"n_clusters": n_clusters_values},
+            GMMClassification.name(): {"n_components": n_clusters_values},
+            BirchClassification.name(): {"n_clusters": n_clusters_values},
+            SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
+            SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
+                               "gini_threshold": gini_thresholds, "p_threshold": p_quantile},
+        }
+
+        # Train/Test split and update data in the hierarchy
+        df_train, df_test = train_test_splitting(data_df)
+        update_data_and_training_data(root_node=root_node, df_train=df_train, data_df=data_df)
+
+        # root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=100)
+        X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=100)
+
+        rf_instance = RandomForestClassMethod()
+        rf_instance.fit(X_train, y_train)
+        rf_instance.predict_test_samples(df_test)
+        clustering_df = rf_instance.get_accuracy_per_e_df(run_id=1)
+        print(clustering_df)
+        stats_df = rf_instance.get_stats_df(run_id=1)
+        predictions_df = rf_instance.get_predictions_df(run_id=1)
+
+        for method in METHODS:
+            parameter_dicts = methods_to_parameters[method.name()]
+            for parameter_vals in product(*parameter_dicts.values()):
+                print(list(product(*parameter_dicts.values())))
+                print(dict(zip(parameter_dicts, parameter_vals)))
+                method_instance = method(**dict(zip(parameter_dicts, parameter_vals)))
+                method_instance.fit(X_train, y_train)
+                method_instance.predict_test_samples(df_test)
+                accuracy_df = method_instance.get_accuracy_per_e_df(run_id=1)
+                print(accuracy_df)
+
+                method_instance.track_stats()
+                stats = method_instance.get_stats_df(run_id=1)
+
+                clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
+                stats_df = pd.concat([stats_df, stats])
+
+                print(stats_df[["CHI"]])
+                predictions = method_instance.get_predictions_df(run_id=1)
+                predictions_df = pd.concat([predictions_df, predictions])
+
+        clustering_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_acc.csv")
+        stats_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_stats.csv")
+        predictions_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_preds.csv")
