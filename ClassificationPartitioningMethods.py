@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import warnings
 from abc import abstractmethod
 from collections import Counter
 from itertools import product
@@ -11,7 +12,7 @@ from sklearn.cluster import KMeans, Birch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
 from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score, calinski_harabasz_score, \
-    v_measure_score
+    v_measure_score, davies_bouldin_score, silhouette_score
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from sklearn.pipeline import Pipeline
@@ -21,12 +22,16 @@ import pandas as pd
 from DataGenerator import ImbalanceGenerator
 from Utility import train_test_splitting, update_data_and_training_data
 from Utility import get_train_test_X_y
-from Hierarchy import HardCodedHierarchy
+from Hierarchy import HardCodedHierarchy, FlatHierarchy
 
-random_forest_parameters = {'random_state': 1234, 'n_estimators': 200,
+random_forest_parameters = {'random_state': 1234,
+                            'n_estimators': 200, # put this in relation to number of samples/features?
                             # 'n_jobs': -1
                             }
 
+from sklearn.exceptions import UndefinedMetricWarning
+
+warnings.filterwarnings('ignore', category=UndefinedMetricWarning)
 
 def gini(x):
     my_index = cm.Index()
@@ -50,11 +55,10 @@ class StatisticTracker:
         self.sph_count = 0
         self.cpi_count = 0
 
-        self.calinski = 0
-        self.dbi = 0
-
         self.v_measure = 0
         self.avg_calinski = 0
+        self.dbi_score = 0
+        self.sil_score = 0
 
         # keep track of predictions, i.e., which sample with its group and class was predicted correctly at which position
         self.predictions = []
@@ -71,6 +75,8 @@ class StatisticTracker:
         n_partitions = sum([len(x) if isinstance(x, tuple) else 1 for x in partitions_for_node.values()])
         n_partitions = 0
         avg_calinski = 0
+        avg_dbi = 0
+        avg_sil = 0
 
         for partition_key, partition in partitions_for_node.items():
 
@@ -89,9 +95,12 @@ class StatisticTracker:
                 # Example of CH score --> Can be modified for all metrics!
                 # Todo: What is a good/best way to do this???
                 X = KNNImputer().fit_transform(data)
-                ch_score = calinski_harabasz_score(X, labels)
-                print(ch_score)
-                avg_calinski += ch_score
+                # = calinski_harabasz_score(X, labels)
+                #print(ch_score)
+                #avg_calinski += ch_score
+                #avg_dbi += davies_bouldin_score(X, labels)
+                #avg_sil += silhouette_score(X, labels)
+
 
                 if -1 in labels:
                     # there was OvA Binarization, do not use that for statistics
@@ -107,14 +116,11 @@ class StatisticTracker:
 
                 df = pd.DataFrame(data=data, columns=[f"F{i}" for i in range(data.shape[1])])
                 df = df.dropna(axis=1, how='all')
-                percent_missing = df.isnull().sum() * 100 / len(df)
-                missing_value_df = pd.DataFrame({'column_name': df.columns,
-                                                 'percent_missing': percent_missing})
 
-                missing = missing_value_df.mean(axis=0).values[0]
+                missing = df.isna().sum().sum()/(df.shape[0] * df.shape[1])
                 self.missing_features += missing
                 self.samples += data.shape[0]
-                self.features += df.shape[1]
+                self.features += data.shape[1]
 
         self.classes = self.classes / n_partitions
         self.gini_index = self.gini_index / n_partitions
@@ -122,11 +128,12 @@ class StatisticTracker:
         self.samples = self.samples / n_partitions
         self.features = self.features / n_partitions
 
-
         self.avg_calinski = avg_calinski / n_partitions
+        self.dbi_score = avg_dbi/n_partitions
+        self.sil_score = avg_sil / n_partitions
 
     def get_stats_df(self):
-        # Todo: Key-value dic, where value is function how to compute the stat?
+        # Todo: Key-value dic, where value is function how to compute the stat? Or just with the score.
         return pd.DataFrame(data={
             "#Samples": [self.samples],
             "missing": [self.missing_features],
@@ -135,7 +142,9 @@ class StatisticTracker:
             "Gini": [self.gini_index],
             "#SPH": [self.sph_count],
             "#CPI": [self.cpi_count],
-            "CHI": [self.avg_calinski]
+            "CHI": [self.avg_calinski],
+            "SIL": [self.sil_score],
+            "DBI": [self.dbi_score]
         })
 
     def add_predictions(self, y_probas, y_true, e, groups, class_labels):
@@ -159,7 +168,6 @@ class StatisticTracker:
 
             # check for first occurence that the prediction equals the true y value
             correct_position = np.where(top_e_pred == y)[0]
-            print(correct_position)
 
             # if prediction is not amongst top e, then the correct prediction is 0 (not found)
             if len(correct_position) == 0:
@@ -168,7 +176,6 @@ class StatisticTracker:
                 # have to add 1, because first correct position gives index 0
                 correct_position = correct_position[0] + 1
             self.predictions.append({"group": group, "target": y, "correct_position": correct_position})
-            print(correct_position)
 
     def get_predictions_dict(self):
         return self.predictions
@@ -307,12 +314,15 @@ class RandomForestClassMethod(ClassificationMethod):
         return self.classifier.fit(X_train, y_train)
 
     def predict(self, df_test, **kwargs):
-        X_test = df_test[[f"F{i}" for i in range(100)]]
+        df_test_numeric = df_test.select_dtypes(include=np.float)
+        X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
+        #X_test = df_test[[f"F{i}" for i in range(100)]]
         X_test = self.imp.transform(X_test)
         return self.classifier.predict(X_test)
 
     def predict_test_samples(self, df_test, e=10):
-        X_test = df_test[[f"F{i}" for i in range(100)]]
+        df_test_numeric = df_test.select_dtypes(include=np.float)
+        X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
         X_test = self.imp.transform(X_test)
         y_pred = self.classifier.predict_proba(X_test)
         y_true = df_test['target'].to_numpy()
@@ -346,7 +356,8 @@ class RandomForestBorutaMethod(RandomForestClassMethod):
         return super().fit(X_train, y_train)
 
     def predict_test_samples(self, df_test, e=10):
-        X_test = df_test[[f"F{i}" for i in range(100)]].to_numpy()
+        df_test_numeric = df_test.select_dtypes(include=np.float)
+        X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
         y_true = df_test['target'].to_numpy()
 
         X_test = self.feat_selector.transform(X_test, weak=True)
@@ -408,7 +419,9 @@ class SPH(ClassificationMethod):
                     self.stats_tracker.add_surrogate_set(traverse_node.node_id)
 
                 if not check_passed and traverse_node.parent:
-                    print(f"Using surrogate for {traverse_node.node_id} with info loss {info_loss}")
+                    print(
+                        f"Using surrogate for {traverse_node.node_id}, which is {traverse_node.parent.node_id} "
+                        f"with info loss {info_loss}")
                     traverse_node = traverse_node.parent
                 else:
                     # if  np.unique(group_sample_labels):
@@ -489,7 +502,9 @@ class SPH(ClassificationMethod):
             # --> easier for prediction since the classifiers per group have different classes
             for group in df_test['group'].unique():
                 test_group_df = df_test[df_test['group'] == group]
-                sample_data = test_group_df[[f"F{i}" for i in range(100)]].to_numpy()
+                df_test_numeric = test_group_df.select_dtypes(include=np.float)
+                sample_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
+                #sample_data = test_group_df[[f"F{i}" for i in range(100)]].to_numpy()
                 y_pred = self._predict_test_data_for_group(sample_data, group)
                 labels = self.model_repository[group].classes_
                 y_test_group = test_group_df["target"].to_numpy()
@@ -704,7 +719,8 @@ class SPHandCPI(SPH):
             # --> easier for prediction since the classifiers per group have different classes
             for group in df_test['group'].unique():
                 test_group_df = df_test[df_test['group'] == group]
-                sample_data = test_group_df[[f"F{i}" for i in range(100)]].to_numpy()
+                df_test_numeric = test_group_df.select_dtypes(include=np.float)
+                sample_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
 
                 clf = self.model_repository[group]
 
@@ -863,7 +879,8 @@ class ClusteringClassification(ClassificationMethod):
         print(self.model_repository)
 
     def predict_test_samples(self, df_test: pd.DataFrame, e=10):
-        X_test = df_test[[f"F{i}" for i in range(100)]]
+        df_test_numeric = df_test.select_dtypes(include=np.float)
+        X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
         X_test = np.nan_to_num(X_test, nan=nan_replacement)
         df_test["cluster_id"] = self.cluster_model.predict(X_test)
 
@@ -871,7 +888,9 @@ class ClusteringClassification(ClassificationMethod):
             cluster_test_samples = df_test[df_test["cluster_id"] == cluster_id]
             clf_model = self.model_repository[cluster_id]
 
-            cluster_test_data = cluster_test_samples[[f"F{i}" for i in range(100)]]
+            df_test_numeric = cluster_test_samples.select_dtypes(include=np.float)
+            cluster_test_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
+            #cluster_test_data = cluster_test_samples[[f"F{i}" for i in range(100)]]
             true_labels = cluster_test_samples["target"].to_numpy()
             y_probas = clf_model.predict_proba(cluster_test_data)
 
@@ -941,12 +960,12 @@ if __name__ == '__main__':
     n_clusters_values = [10, 15, 20, 25, 26, 30, 35, 40, 45, 50]
 
     METHODS = [
-        RFperGroup,
-        KMeansClassification,
-        BirchClassification,
-        GMMClassification,
+        # RFperGroup,
+        # KMeansClassification,
+        # BirchClassification,
+        # GMMClassification,
         SPH,
-        SPHandCPI,
+        # SPHandCPI,
         # RandomForestClassMethod,
         # RandomForestBorutaMethod,
         # CPI,
@@ -957,13 +976,31 @@ if __name__ == '__main__':
 
     output_directoy = "clustering/"
     imb_degrees = ImbalanceGenerator.imbalance_degrees
+    imb_degrees = ["normal"]
+
+    n_samples = 1050
+    n_train_samples = 750
+    n_features = 20
+    missing = 0.5
 
     for imbalance_degree in imb_degrees:
-        # if not os.path.exists(output_directoy + f"{imbalance_degree})"):
-        #    os.makedirs(output_directoy + f"{imbalance_degree}")
+        n_train_samples = n_samples * (750/1050)
 
         generator = ImbalanceGenerator()
-        data_df = generator.generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree)
+        data_df = generator.generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree,
+                                                                 root=FlatHierarchy().create_hierarchy(),
+                                                                 n_samples_total=n_samples, n_features=n_features,
+                                                                 features_remove_percent=missing)
+        n_classes = len(data_df["target"].unique())
+        n_samples = len(data_df)
+        n_features_generated = data_df.shape[1]
+        missing = data_df.isna().sum().sum()/(data_df.shape[0] * data_df.shape[1])
+        print(f"n classes: {n_classes}")
+        print(f"n samples: {n_samples}")
+        print(f"n features: {n_features_generated}")
+        print(f"missing: {missing}")
+        print(f"gini: {gini(data_df['target'].to_numpy())}")
+
         root_node = generator.root
 
         methods_to_parameters = {
@@ -976,14 +1013,17 @@ if __name__ == '__main__':
             SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
             SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
                                "gini_threshold": gini_thresholds, "p_threshold": p_quantile},
+            CPI.name(): {"gini_threshold": gini_thresholds, "p_threshold": p_quantile},
         }
 
         # Train/Test split and update data in the hierarchy
-        df_train, df_test = train_test_splitting(data_df)
-        update_data_and_training_data(root_node=root_node, df_train=df_train, data_df=data_df)
+        df_train, df_test = train_test_splitting(data_df, n_train_samples=n_train_samples)
+        update_data_and_training_data(root_node=root_node, df_train=df_train, data_df=data_df, n_features=n_features)
 
-        # root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=100)
-        X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=100)
+        print(len(df_train))
+        print(len(df_test))
+
+        X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=n_features)
 
         rf_instance = RandomForestClassMethod()
         rf_instance.fit(X_train, y_train)
@@ -1010,10 +1050,9 @@ if __name__ == '__main__':
                 clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
                 stats_df = pd.concat([stats_df, stats])
 
-                print(stats_df[["CHI"]])
                 predictions = method_instance.get_predictions_df(run_id=1)
                 predictions_df = pd.concat([predictions_df, predictions])
 
-        clustering_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_acc.csv")
-        stats_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_stats.csv")
-        predictions_df.to_csv(output_directoy + f"{imbalance_degree}/clustering_preds.csv")
+            clustering_df.to_csv(output_directoy + f"{imbalance_degree}/acc.csv")
+            stats_df.to_csv(output_directoy + f"{imbalance_degree}/stats.csv")
+            predictions_df.to_csv(output_directoy + f"{imbalance_degree}/preds.csv")

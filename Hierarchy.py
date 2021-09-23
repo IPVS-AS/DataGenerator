@@ -98,6 +98,9 @@ class Node(NodeInformation, NodeMixin):
             return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
                    f" n_classes={self.n_classes}]"
 
+    def remove_children(self):
+        self.children = list()
+
 
 class HardCodedHierarchy:
     """
@@ -228,9 +231,38 @@ class HardCodedHierarchy:
                                            + [1, 1, 1, 1] + [4 for _ in range(79, 85)])
         return root
 
+    def name(self):
+        return "hardcoded-hierarchy"
 
-root = HardCodedHierarchy().create_hardcoded_hierarchy()
-print(RenderTree(root))
+
+class FlatHierarchy:
+    """
+    Represents a 'hardcoded' hierarchy that is very close to the Hierarchy from the hirsch et al. paper.
+    We define exactly how many samples, classes, features and even how often each class occurs.
+    """
+
+    def __init__(self):
+        pass
+
+    def create_hierarchy(self):
+        # level 0
+        #root = Node(node_id="Engine", n_samples=1050, feature_set=None, n_classes=84, classes=(1, 84))
+
+        hard_coded_root = HardCodedHierarchy().create_hardcoded_hierarchy()
+        print(hard_coded_root.children)
+        product_group_nodes = [node for node in PreOrderIter(hard_coded_root) if not node.children]
+        print(product_group_nodes)
+
+        hard_coded_root.children = product_group_nodes
+        print(hard_coded_root.children)
+
+        return hard_coded_root
+
+    def name(self):
+        return "flat-hierarchy"
+
+root = FlatHierarchy().create_hierarchy()
+print(root.children)
 nodes = [root]
 
 # test that classes and n_classes is the same in each node

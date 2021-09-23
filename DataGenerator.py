@@ -6,6 +6,7 @@ from typing import List
 import imblearn
 from anytree import RenderTree
 from skclean.simulate_noise import flip_labels_uniform
+from sklearn.cluster import KMeans
 from sklearn.datasets import make_classification, make_blobs
 
 import numpy as np
@@ -13,7 +14,7 @@ import pandas as pd
 from sklearn.impute import KNNImputer
 from sklearn.model_selection import train_test_split
 
-from Hierarchy import Node, HardCodedHierarchy
+from Hierarchy import Node, HardCodedHierarchy, FlatHierarchy
 import concentrationMetrics as cm
 
 #np.random.seed(1)
@@ -191,14 +192,12 @@ class ImbalanceGenerator:
 
         # Now, we generate the actual data for the groups!
         groups = self._generate_product_groups_from_hierarchy(group_nodes_to_create, n_classes,
-                                                              imbalance_degree=imbalance_degree, noise=noise)
+                                                              imbalance_degree=imbalance_degree, noise=noise,
+                                                              n_samples_total=n_samples_total)
 
         dfs = []
         levels = list(range(n_levels - 1))
         self.root = root
-        # self.root.data = np.vstack(groups)
-
-        # self.root.target = np.vstack
 
         for group in groups:
             features_names = [f"F{f}" for f in range(n_features)]
@@ -361,7 +360,7 @@ class ImbalanceGenerator:
 
                 group_nodes_to_create[group_index] = group_node
 
-        groups = self._generate_product_groups_default(group_nodes_to_create, total_n_classes)
+        groups = self._generate_product_groups_default(group_nodes_to_create, total_n_classes, n_samples_total)
 
         dfs = []
         levels = list(range(n_levels - 1))
@@ -386,7 +385,7 @@ class ImbalanceGenerator:
         return pd.concat(dfs).reset_index()
 
     def _generate_product_groups_from_hierarchy(self, group_nodes: List[Node], total_n_classes,
-                                                imbalance_degree="normal", noise=0):
+                                                imbalance_degree="normal", noise=0, n_samples_total=1050):
         """
         Generates the product groups. That is, here is the actual data generated.
         For each group, according to the number of classes, samples and features the data is generated.
@@ -412,11 +411,26 @@ class ImbalanceGenerator:
         feature_limits = {feature: 0 for feature in total_sample_feature_set}
 
         current_class_num = 0
+
+        n_samples_to_generate = sum([int(group.n_samples * n_samples_total/1050) for group in group_nodes])
+
+        remaining_samples = []
+        if n_samples_total > n_samples_to_generate:
+            # share the remaining samples among the groups
+            remaining_samples = self._eq_div(n_samples_total - n_samples_to_generate, len(group_nodes))
+
         # bottom up approach
         for i, group in enumerate(group_nodes):
             feature_set = group.feature_set
             n_features = len(feature_set)
             n_samples = group.n_samples
+            mult_factor = n_samples_total/1050
+            n_samples = int(n_samples * mult_factor)
+
+            # add samples that are missing due to rounding errors
+            if len(remaining_samples) > i:
+                n_samples += remaining_samples[i]
+
             n_classes = group.n_classes
             classes = group.classes
 
@@ -749,15 +763,17 @@ if __name__ == '__main__':
 
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Example with noisy Data --------------------------------')
+    from dcm import dcm
 
     generator = ImbalanceGenerator()
     # of course this also works with different noise levels and different imbalance degrees
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.3)
+    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.0, n_samples_total=10000,
+                                                        root=FlatHierarchy().create_hierarchy())
     root = generator.root
+    X = df[[f"F{i}" for i in range(100)]].to_numpy()
     y_true = df['target'].to_numpy()
     y_nois = df['noisy target']
     noisyCount = np.count_nonzero((y_true == y_nois) == False)
-
     print(noisyCount)
     gini_value = gini(y_true)
     # Render the hierarchy
@@ -766,7 +782,12 @@ if __name__ == '__main__':
     # actual labels
     print(df['target'])
     print('----------------------------------------------------------------------------------------')
+    print(len(df))
 
+    for group in df["group"].unique():
+        group_df = df[df["group"] == group]
+        print(f"group {group} has {len(group_df)} samples")
+    exit()
     print('----------------------------------------------------------------------------------------')
     print('------------------------------Very Low Imbalance Degree --------------------------------')
 
@@ -854,7 +875,6 @@ if __name__ == '__main__':
         #    assert y_test_classes == n_classes and y_train_classes == n_classes
         # if len(test[test['freq'] == 1]) == 0:
         return train, test
-
 
     np.random.seed(10 * 5)
     random.seed(10 * 10)

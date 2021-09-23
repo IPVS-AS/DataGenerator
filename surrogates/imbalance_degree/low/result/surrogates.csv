@@ -1,0 +1,15 @@
+surrogate,max info loss,Method,Run,gini,p value
+hde-OM2-2,0.3,SPH,1,,
+hde-OM3-1,0.3,SPH,1,,
+mde-OM1-5,0.3,SPH,1,,
+mde-OM1-7,0.3,SPH,1,,
+mde-OM3-1,0.3,SPH,1,,
+mde-OM3-10,0.3,SPH,1,,
+mde-OM3-11,0.3,SPH,1,,
+hde-OM2-2,0.3,SPH+CPI,1,0.35,0.8
+hde-OM3-1,0.3,SPH+CPI,1,0.35,0.8
+mde-OM1-5,0.3,SPH+CPI,1,0.35,0.8
+mde-OM1-7,0.3,SPH+CPI,1,0.35,0.8
+mde-OM3-1,0.3,SPH+CPI,1,0.35,0.8
+mde-OM3-10,0.3,SPH+CPI,1,0.35,0.8
+mde-OM3-11,0.3,SPH+CPI,1,0.35,0.8

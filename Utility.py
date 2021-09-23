@@ -4,6 +4,7 @@ import numpy as np
 from anytree import PreOrderIter
 from sklearn.model_selection import train_test_split
 
+
 def get_train_test_X_y(df_train, df_test, n_features=100):
     X_train = df_train[[f"F{i}" for i in range(n_features)]].to_numpy()
     y_train = df_train["target"].to_numpy()
@@ -11,6 +12,7 @@ def get_train_test_X_y(df_train, df_test, n_features=100):
     X_test = df_test[[f"F{i}" for i in range(n_features)]].to_numpy()
     y_test = df_test["target"].to_numpy()
     return X_train, X_test, y_train, y_test
+
 
 def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     """
@@ -33,7 +35,7 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     print(f"number of classes that have only one sample: {counter_one}")
     # split with stratify such that each class occurs in train and test set
     train, test = train_test_split(df, train_size=train_percent, random_state=1234,
-                                   #stratify=df["target"]
+                                   # stratify=df["target"]
                                    )
     n_not_in_train = 1
 
