@@ -6,7 +6,7 @@ from abc import abstractmethod
 from collections import Counter
 from itertools import product
 
-from anytree import PreOrderIter
+from anytree import PreOrderIter, RenderTree
 from boruta import BorutaPy
 from sklearn.cluster import KMeans, Birch
 from sklearn.ensemble import RandomForestClassifier
@@ -15,6 +15,7 @@ from sklearn.metrics import jaccard_score, accuracy_score, top_k_accuracy_score,
     v_measure_score, davies_bouldin_score, silhouette_score
 import numpy as np
 from sklearn.mixture import GaussianMixture
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 import concentrationMetrics as cm
 import pandas as pd
@@ -232,7 +233,7 @@ class ClassificationMethod:
     def get_accuracy_per_e_df(self, run_id):
         """
         Returns a dataframe that contains the A@e and RA@e scores for this method.
-        TO this end, it requires to already fitted and made predictions.
+        TO this end, it requires to already be fitted and made predictions.
         :param run_id:
         :return: DataFrame that contains the A@e, RA@e scores as well as the method name, the run_id and
         the parameter values
@@ -718,10 +719,10 @@ class SPHandCPI(SPH):
             # predict samples for each group
             # --> easier for prediction since the classifiers per group have different classes
             for group in df_test['group'].unique():
+
                 test_group_df = df_test[df_test['group'] == group]
                 df_test_numeric = test_group_df.select_dtypes(include=np.float)
                 sample_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
-
                 clf = self.model_repository[group]
 
                 for sample, y_true in zip(sample_data, test_group_df['target'].to_numpy()):
@@ -817,6 +818,7 @@ class CPI(SPHandCPI):
         # cpi_data, cpi_labels = self._run_cpi(X_train, y_train)
         # Bad hack, we put for each leave node the whole data and train Random Forest. Not the best but shortest way.
         groups = [node for node in PreOrderIter(self.hierarchy) if not node.children]
+        print(f"Groups are: {groups}")
         partitions_for_node = {group.node_id: {"data": X_train, "labels": y_train} for group in groups}
 
         self._build_model_repository(partitions_for_node)
@@ -939,6 +941,26 @@ CLUSTERING_MAP = {
 }
 
 if __name__ == '__main__':
+    generator = ImbalanceGenerator()
+    df = generator.generate_data_with_product_hierarchy(root=None, low_high_split=(0.3, 0.7))
+    print(RenderTree(generator.root))
+    print(len(df))
+    print(gini(df["target"]))
+
+    df_train, df_test = train_test_split(df,train_size=0.7, stratify=df["group"])
+    #root, df_test= make_unbalance_hierarchy(df_test=df_test, level_cutoff=2, root_node=generator.root,
+    #                                        n_nodes_to_cutoff=2)
+    #print(RenderTree(root))
+
+    rf_classifier = RandomForestClassMethod()
+    rf_classifier.fit(df_train[[f"F{i}" for i in range(100)]], df_train["target"])
+    rf_classifier.predict_test_samples(df_test)
+    print(rf_classifier.get_accuracy_per_e_df(run_id=1))
+    print(rf_classifier.get_stats_df(run_id=1))
+    print(gini(df["target"]))
+
+    exit()
+
     gini_thresholds = [
         0.3,
         0.35,

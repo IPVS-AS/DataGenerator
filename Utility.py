@@ -35,7 +35,7 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     print(f"number of classes that have only one sample: {counter_one}")
     # split with stratify such that each class occurs in train and test set
     train, test = train_test_split(df, train_size=train_percent, random_state=1234,
-                                   # stratify=df["target"]
+                                   stratify=df["group"]
                                    )
     n_not_in_train = 1
 

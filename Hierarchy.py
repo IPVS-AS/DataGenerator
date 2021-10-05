@@ -4,6 +4,8 @@ import numpy as np
 
 np.random.seed(1234)
 
+HIERARCHY_TYPES = ["hardcoded", "flat", "auto"]
+
 
 class NodeInformation:
     def __init__(self, feature_set, n_samples, data=None, n_classes=None, target=None, training_data=None,
@@ -89,14 +91,21 @@ class Node(NodeInformation, NodeMixin):
         return self.__repr__()
 
     def __repr__(self):
-        if self.classes and self.gini:
-            # nice to see gini as well if we set it
+        if self.classes:
+            if self.gini:
+                # nice to see gini as well if we set it
+                return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+                       f" n_classes={self.n_classes}, " \
+                       f"gini={round(self.gini, 2)}]]"
+
+            if self.class_occurences:
+                return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+                       f" n_classes={self.n_classes}, classes={self.classes}, class_occurences={self.class_occurences}]"
             return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
-                   f" n_classes={self.n_classes}, " \
-                   f"gini={round(self.gini, 2)}]]"
-        else:
-            return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
-                   f" n_classes={self.n_classes}]"
+                   f" n_classes={self.n_classes}, classes={self.classes}]"
+
+        return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+               f" n_classes={self.n_classes}, class_occurences={self.class_occurences}]"
 
     def remove_children(self):
         self.children = list()
@@ -116,6 +125,7 @@ class HardCodedHierarchy:
         root = Node(node_id="Engine", n_samples=1050, feature_set=None, n_classes=84, classes=(1, 84))
 
         # level 1
+        # TODO: mde has 3 times more samples but less classes --> I guess hde should have less classes ...
         hde = Node(node_id="hde", n_samples=277, parent=root, feature_set=None, n_classes=60, classes=(1, 60))
         # ## all classes for level 2 and 3 that belong to hde have to have the classes in the same range as hde, i.e.,
         # (1, 60)
@@ -177,7 +187,7 @@ class HardCodedHierarchy:
                          classes=(27, 34), class_occurences=[1, 1, 1, 1, 4, 4, 8, 5])
         mde_om1_3 = Node(node_id="mde-OM1-3", n_samples=81, parent=mde_om1, feature_set=None, n_classes=20,
                          classes=(35, 54),
-                         class_occurences=[3 for _ in range(35, 42)] + [2 for _ in range(42, 51)] + [3, 33]+ [3 for _
+                         class_occurences=[3 for _ in range(35, 42)] + [2 for _ in range(42, 51)] + [3, 33] + [3 for _
                                                                                                                in
                                                                                                                range(55,
                                                                                                                      57)])
@@ -237,32 +247,76 @@ class HardCodedHierarchy:
 
 class FlatHierarchy:
     """
-    Represents a 'hardcoded' hierarchy that is very close to the Hierarchy from the hirsch et al. paper.
-    We define exactly how many samples, classes, features and even how often each class occurs.
+    In this class, we define a flat version of a hierarchy, i.e., with only root level and one level underneath.
+    This level can be specified, but this hierarchy requires a hierarchy which it flattens, so this is no hierarchy itself.
+    Yet, works with any kind of Hierarchy!
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy()):
+        self.hierarchy_to_flatten = hierarchy
 
-    def create_hierarchy(self):
-        # level 0
-        #root = Node(node_id="Engine", n_samples=1050, feature_set=None, n_classes=84, classes=(1, 84))
+    def create_hierarchy(self, level_cutoff="max"):
+        if level_cutoff == "max":
+            level_cutoff = self.hierarchy_to_flatten.height
 
-        hard_coded_root = HardCodedHierarchy().create_hardcoded_hierarchy()
-        print(hard_coded_root.children)
-        product_group_nodes = [node for node in PreOrderIter(hard_coded_root) if not node.children]
-        print(product_group_nodes)
+        print(self.hierarchy_to_flatten.children)
+        group_nodes = [node for node in PreOrderIter(self.hierarchy_to_flatten) if node.level == level_cutoff]
+        print(group_nodes)
 
-        hard_coded_root.children = product_group_nodes
-        print(hard_coded_root.children)
+        group_nodes = [Node(n_samples=traverse_node.n_samples, feature_set=traverse_node.feature_set,
+                            node_id=traverse_node.node_id,
+                            classes=traverse_node.classes, class_occurences=traverse_node.class_occurences,
+                            n_classes=traverse_node.n_classes, parent=traverse_node.parent, childrens=()) for
+                       traverse_node in group_nodes]
 
-        return hard_coded_root
+        self.hierarchy_to_flatten.children = group_nodes
+        print(self.hierarchy_to_flatten.children)
+
+        return self.hierarchy_to_flatten
 
     def name(self):
-        return "flat-hierarchy"
+        return f"flat-{self.hierarchy_to_flatten.name}"
 
-root = FlatHierarchy().create_hierarchy()
-print(root.children)
+def assign_group_name(x, cutoff_node_ids, level_cutoff):
+    if f"level-{level_cutoff}" in x:
+         return x[f"level-{level_cutoff}"] if x[f"level-{level_cutoff}"] in cutoff_node_ids else x["group"]
+    else:
+        # should be last level (so group)
+        return x["group"]
+
+
+def make_unbalance_hierarchy(root_node, level_cutoff, df_test, n_nodes_to_cutoff="all", flatten=False):
+    level_nodes = [node for node in PreOrderIter(root_node) if node.level == level_cutoff]
+    if n_nodes_to_cutoff == 'all':
+        n_nodes_to_cutoff = len(level_nodes)
+    # Specify random indices for nodes that should be cutoff
+    cutoff_indices = np.random.choice(len(level_nodes), n_nodes_to_cutoff, replace=False)
+    cutoff_node_ids = [level_nodes[i].node_id for i in cutoff_indices]
+
+    for i in range(len(level_nodes)):
+        if i == n_nodes_to_cutoff:
+            break
+
+        node_to_cutoff = level_nodes[cutoff_indices[i]]
+        traverse_node = node_to_cutoff
+
+        # Data is already generated and training data updated in all nodes
+        # Hence we can pass the training data from the node to cutoff further down to the new "synthetic" child node
+        traverse_node.children = ()
+
+        if flatten:
+            traverse_node.parent.children = [child for child in traverse_node.parent.children if
+                                             child.node_id != traverse_node.node_id]
+            traverse_node.parent = root_node
+
+    df_test["group"] = df_test.apply(
+        lambda x: assign_group_name(x, cutoff_node_ids, level_cutoff), axis=1)
+    return root_node, df_test
+
+
+root = FlatHierarchy(hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy()).create_hierarchy(level_cutoff=2)
+#print(RenderTree(root))
+#exit()
 nodes = [root]
 
 # test that classes and n_classes is the same in each node
@@ -276,6 +330,7 @@ while True:
     if len(nodes) == 0:
         break
 
+"""
 product_group_nodes = [node for node in PreOrderIter(root) if not node.children]
 for node in product_group_nodes:
     print(f"current node: {node.node_id}")
@@ -283,3 +338,4 @@ for node in product_group_nodes:
     assert sum(node.class_occurences) == node.n_samples
     print(f"len(node.class_occurences): {len(node.class_occurences)} == {node.n_classes}: node.n_classes")
     assert len(node.class_occurences) == node.n_classes
+"""

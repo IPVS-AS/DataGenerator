@@ -4,8 +4,10 @@ import random
 import warnings
 from itertools import product
 
+from anytree import PreOrderIter, RenderTree
+
 from ClassificationPartitioningMethods import SPHandCPI, SPH, RandomForestClassMethod, RandomForestBorutaMethod, CPI, \
-    random_forest_parameters, KMeansClassification, GMMClassification, BirchClassification
+    random_forest_parameters, KMeansClassification, GMMClassification, BirchClassification, RFperGroup
 
 import pandas as pd
 import numpy as np
@@ -13,7 +15,7 @@ import numpy as np
 from DataGenerator import ImbalanceGenerator
 
 from Utility import train_test_splitting, update_data_and_training_data, get_train_test_X_y
-from Hierarchy import HardCodedHierarchy, FlatHierarchy
+from Hierarchy import HardCodedHierarchy, FlatHierarchy, HIERARCHY_TYPES, make_unbalance_hierarchy
 
 from sklearn.exceptions import UndefinedMetricWarning
 
@@ -21,16 +23,14 @@ warnings.filterwarnings('ignore', category=UndefinedMetricWarning)
 
 
 def store_data_to_csv(df_train, df_test, data_output_directory, run_id):
-    df_train.to_csv(data_output_directory + f"/train_{run_id}.csv")
+    df_train.to_csv(data_output_directory + f"/train_n_{run_id}.csv")
     df_test.to_csv(data_output_directory + f"/test_{run_id}.csv")
 
 
-def run_machine_learning(gini_thresholds: list,
-                         p_quantile: list,
-                         max_info_loss_values: list,
-                         total_runs: int,
-                         imbalance_degree: str = "normal",
-                         output_directory: str = ""):
+def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_values: list, total_runs: int,
+                         imbalance_degree: str = "normal", output_dir: str = "",
+                         features_remove_percent_list=[0.2], unbalance_hierarchy=False, n_nodes_to_cutoff="all",
+                         level_cutoff=2):
     if imbalance_degree == 'all':
         imbalance_degrees = ImbalanceGenerator.imbalance_degrees
     else:
@@ -38,125 +38,139 @@ def run_machine_learning(gini_thresholds: list,
     runs = range(1, total_runs + 1, 1)
     ###############################################################
 
-    #imbalance_degrees = ["normal"]
+    print(n_features_list)
+
     for imbalance_degree in imbalance_degrees:
+        # Results to capture as files
+        acc_result_df = pd.DataFrame()
+        detailed_predictions_df = pd.DataFrame()
+        stats_result_df = pd.DataFrame()
+        surrogates_df = pd.DataFrame()
+
+        ##############################################################################################
+        ################ Setting up output directories based on imbalance degree #####################
+        # Default for directories, append the output_directory
+        if output_dir == "":
+            out_dir = f"imbalance_degree/{imbalance_degree}/"
+        else:
+            out_dir = f"{output_dir}/imbalance_degree/{imbalance_degree}/"
+
+        data_output_directory = f"{out_dir}/data"
+        result_output_directory = f"{out_dir}/result"
+
+        if not os.path.exists(data_output_directory):
+            os.makedirs(data_output_directory)
+
+        if not os.path.exists(result_output_directory):
+            os.makedirs(result_output_directory)
+        ##############################################################################################
+
         for n_samples in n_samples_list:
             n_train_samples = n_samples * (750 / 1050)
-
             for n_features in n_features_list:
-                ##############################################################################################
-                ################ Setting up output directories based on imbalance degree #####################
-                # Default for directories, append the output_directory
-                if output_directory == "":
-                    output_directory = f"imbalance_degree/{imbalance_degree}/"
-                else:
-                    output_directory += f"{output_directory}/imbalance_degree/{imbalance_degree}/"
+                for features_remove_percent in features_remove_percent_list:
+                    print(features_remove_percent)
+                    for run_id in runs:
+                        # maybe change back to 5?
+                        np.random.seed(run_id * 10)
+                        random.seed(run_id * 10)
 
-                data_output_directory = f"{output_directory}/data"
-                result_output_directory = f"{output_directory}/result"
+                        root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
 
-                if not os.path.exists(data_output_directory):
-                    os.makedirs(data_output_directory)
+                        if hierarchy_type == "flat":
+                            root_node = FlatHierarchy().create_hierarchy(level_cutoff=level_cutoff)
+                        elif hierarchy_type == "auto":
+                            root_node = None
 
-                if not os.path.exists(result_output_directory):
-                    os.makedirs(result_output_directory)
-                ##############################################################################################
+                        generator = ImbalanceGenerator()
+                        data_df = generator.generate_data_with_product_hierarchy(root=root_node,
+                                                                                 imbalance_degree=imbalance_degree,
+                                                                                 n_features=n_features,
+                                                                                 n_samples_total=n_samples,
+                                                                                 features_remove_percent=features_remove_percent)
+                        root_node = generator.root
 
-                # Results to capture as files
-                acc_result_df = pd.DataFrame()
-                detailed_predictions_df = pd.DataFrame()
-                stats_result_df = pd.DataFrame()
-                surrogates_df = pd.DataFrame()
+                        # Train/Test split and update data in the hierarchy
+                        df_train, df_test = train_test_splitting(data_df, n_train_samples=n_train_samples)
+                        store_data_to_csv(df_train, df_test, data_output_directory, run_id)
+                        root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=n_features)
+                        X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=n_features)
 
-                for run_id in runs:
-                    # maybe change back to 5?
-                    np.random.seed(run_id * 10)
-                    random.seed(run_id * 10)
+                        if unbalance_hierarchy:
+                            root_node, df_test = make_unbalance_hierarchy(root_node, level_cutoff, n_nodes_to_cutoff,
+                                                                          df_test)
+                            print(RenderTree(root_node))
+                        # Dictionary of parameters for the different methods
+                        methods_to_parameters = {
+                            RFperGroup.name(): {"hierarchy": [root_node]},
+                            RandomForestClassMethod.name(): {"classifier_params": [random_forest_parameters]},
+                            RandomForestBorutaMethod.name(): {"classifier_params": [random_forest_parameters]},
+                            KMeansClassification.name(): {"n_clusters": n_clusters_values},
+                            GMMClassification.name(): {"n_components": n_clusters_values},
+                            BirchClassification.name(): {"n_clusters": n_clusters_values},
+                            SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
+                            SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
+                                               "gini_threshold": gini_thresholds, "p_threshold": p_quantile, },
+                            CPI.name(): {"gini_threshold": gini_thresholds, "p_threshold": p_quantile,
+                                         "hierarchy": [root_node]},
+                        }
 
-                    root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
-                    if hierarchy_type == "flat":
-                        root_node = FlatHierarchy().create_hierarchy()
-                    data_df = ImbalanceGenerator().generate_data_with_product_hierarchy(root=root_node,
-                                                                                        imbalance_degree=imbalance_degree,
-                                                                                        n_features=n_features,
-                                                                                        n_samples_total=n_samples)
+                        for method in METHODS:
+                            # Dictionary of parameters to use for each method, retrieve the one for this method
+                            parameter_dicts = methods_to_parameters[method.name()]
+                            for parameter_vals in product(*parameter_dicts.values()):
+                                # 1.) Instantiate method to execute (SPH, SPHandCPI, ...)
+                                method_instance = method(**dict(zip(parameter_dicts, parameter_vals)))
 
-                    # Train/Test split and update data in the hierarchy
-                    df_train, df_test = train_test_splitting(data_df, n_train_samples=n_train_samples)
-                    store_data_to_csv(df_train, df_test, data_output_directory, run_id)
-                    root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=n_features)
-                    X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=n_features)
+                                # 2.) Fit Method
+                                method_instance.fit(X_train, y_train)
 
-                    # Dictionary of parameters for the different methods
-                    methods_to_parameters = {
-                        RandomForestClassMethod.name(): {"classifier_params": [random_forest_parameters]},
-                        RandomForestBorutaMethod.name(): {"classifier_params": [random_forest_parameters]},
-                        KMeansClassification.name(): {"n_clusters": n_clusters_values},
-                        GMMClassification.name(): {"n_components": n_clusters_values},
-                        BirchClassification.name(): {"n_clusters": n_clusters_values},
-                        SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
-                        SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
-                                           "gini_threshold": gini_thresholds, "p_threshold": p_quantile, },
-                        CPI.name(): {"gini_threshold": gini_thresholds, "p_threshold": p_quantile},
-                    }
+                                # 3.) Predict the test samples;
+                                # No need to use the return value as we use the method_instance object to retrieve
+                                # the results in a prettier format
+                                method_instance.predict_test_samples(df_test)
 
-                    for method in METHODS:
-                        # Dictionary of parameters to use for each method, retrieve the one for this method
-                        parameter_dicts = methods_to_parameters[method.name()]
-                        for parameter_vals in product(*parameter_dicts.values()):
-                            # 1.) Instantiate method to execute (SPH, SPHandCPI, ...)
-                            method_instance = method(**dict(zip(parameter_dicts, parameter_vals)))
+                                # 4.) Retrieve accuracy Results (A@e and RA@e)
+                                accuracy_per_e_df = method_instance.get_accuracy_per_e_df(run_id)
+                                print(accuracy_per_e_df)
 
-                            # 2.) Fit Method
-                            method_instance.fit(X_train, y_train)
+                                # 5.) We also get the detailed predictions if we want to make further analysis
+                                predictions_df = method_instance.get_predictions_df(run_id)
 
-                            # 3.) Predict the test samples;
-                            # No need to use the return value as we use the method_instance object to retrieve
-                            # the results in a prettier format
-                            method_instance.predict_test_samples(df_test)
+                                # 6.) Save statistics about the dataset and the methods
+                                # track statistics
+                                method_instance.track_stats()
+                                # retrieve method stats and store parameter values
+                                method_stats_df = method_instance.get_stats_df()
 
-                            # 4.) Retrieve accuracy Results (A@e and RA@e)
-                            accuracy_per_e_df = method_instance.get_accuracy_per_e_df(run_id)
-                            print(accuracy_per_e_df)
-                            acc_result_df = pd.concat([acc_result_df, accuracy_per_e_df],
-                                                      ignore_index=True)
+                                surrogates = method_instance.get_surrogates_df(run_id)
 
-                            # 5.) We also get the detailed predictions if we want to make further analysis
-                            predictions_df = method_instance.get_predictions_df(run_id)
-                            detailed_predictions_df = pd.concat([detailed_predictions_df, predictions_df],
-                                                                ignore_index=True)
+                                for df in [predictions_df, method_stats_df, surrogates, accuracy_per_e_df]:
+                                    # add n instances and features to each dataframe
+                                    df["n"] = n_samples
+                                    df["f"] = n_features
+                                    df["mf"] = features_remove_percent
 
-                            # 6.) Save statistics about the dataset and the methods
-                            # track statistics
-                            method_instance.track_stats()
-                            # retrieve method stats and store parameter values
-                            method_stats_df = method_instance.get_stats_df()
-                            # Keep track of all statistics
-                            stats_result_df = pd.concat([stats_result_df, method_stats_df], ignore_index=True)
+                                # Keep track of all statistics
+                                detailed_predictions_df = pd.concat([detailed_predictions_df, predictions_df],
+                                                                    ignore_index=True)
+                                stats_result_df = pd.concat([stats_result_df, method_stats_df], ignore_index=True)
+                                surrogates_df = pd.concat([surrogates_df, surrogates], ignore_index=True)
+                                acc_result_df = pd.concat([acc_result_df, accuracy_per_e_df],
+                                                          ignore_index=True)
 
-                            surrogates = method_instance.get_surrogates_df(run_id)
-                            surrogates_df = pd.concat([surrogates_df, surrogates], ignore_index=True)
-                            print(accuracy_per_e_df)
-                            print(method_stats_df)
-                            print(surrogates_df)
+                                print(accuracy_per_e_df)
+                                print(method_stats_df)
+                                print(surrogates_df)
 
-                            acc_result_df["n"] = n_samples
-                            acc_result_df["f"] = n_features
-
-                            stats_result_df["n"] = n_samples
-                            stats_result_df["f"] = n_features
-
-                            detailed_predictions_df["n"] = n_samples
-                            detailed_predictions_df["f"] = n_features
-
-                            surrogates_df["n"] = n_samples
-                            surrogates_df["f"] = n_features
-
-                            # Todo: Maybe store each method run separately?! Instead of large csv files?
-                            acc_result_df.to_csv(result_output_directory + "/gini_accuracy_all_runs.csv", index=False)
-                            stats_result_df.to_csv(result_output_directory + "/gini_stats.csv", index=False)
-                            detailed_predictions_df.to_csv(result_output_directory + "/predictions.csv", index=False)
-                            surrogates_df.to_csv(result_output_directory + "/surrogates.csv", index=False)
+                                # Todo: Maybe store each method run separately?! Instead of large csv files?
+                                #  also store instances, features and hierarchy name in filename/directory?
+                                acc_result_df.to_csv(result_output_directory + "/gini_accuracy_all_runs.csv",
+                                                     index=False)
+                                stats_result_df.to_csv(result_output_directory + "/gini_stats.csv", index=False)
+                                detailed_predictions_df.to_csv(result_output_directory + "/predictions.csv",
+                                                               index=False)
+                                surrogates_df.to_csv(result_output_directory + "/surrogates.csv", index=False)
 
 
 if __name__ == '__main__':
@@ -187,12 +201,14 @@ if __name__ == '__main__':
 
     n_samples_list = [1050, 5000, 10000]
     n_features_list = [50, 100, 200]
+    features_remove_percent_list = [0.2]
 
     # Machine learning algorithms to execute
     ###############################################################
     METHODS = [
-        SPH,
+        RFperGroup,
         RandomForestClassMethod,
+        SPH,
         RandomForestBorutaMethod,
         KMeansClassification,
         GMMClassification,
@@ -236,7 +252,14 @@ if __name__ == '__main__':
     parser.add_argument('-methods', type=str, nargs='*', help="Methods to execute (SPH, CPI, SPHandCPI, RF, RF+B).",
                         default=METHODS)
     parser.add_argument('-hierarchy', type=str, help="Methods to execute (SPH, CPI, SPHandCPI, RF, RF+B).",
-                        default="hardcoded", choices=["harcoded", "flat"])
+                        default="hardcoded", choices=HIERARCHY_TYPES)
+    parser.add_argument('-output_dir', type=str, help="Name of the output directory where the results will be stored.",
+                        default="")
+    parser.add_argument('-missing_features', default=features_remove_percent_list, type=float, required=False,
+                        nargs='*',
+                        help="Fraction (0 to 1 ) of features to remove. The missing features percentage will be "
+                             "in this are but will be a bit higher (~5%).")
+
     args = parser.parse_args()
 
     run_cpi_no_parameters = args.cpi_free
@@ -251,6 +274,8 @@ if __name__ == '__main__':
     n_features_list = args.features
     hierarchy_type = args.hierarchy
 
+    features_remove_percent = args.missing_features
+    out_dir = args.output_dir
     imbalance_degree = args.imbalance
     total_runs = args.runs
 
@@ -276,6 +301,8 @@ if __name__ == '__main__':
         max_info_loss_values=max_info_loss_values,
         total_runs=total_runs,
         imbalance_degree=imbalance_degree,
+        output_dir=out_dir,
+        features_remove_percent_list=features_remove_percent
         # concentration_measure=concentration_measure,
         # run_cpi_no_parameters=run_cpi_no_parameters,
         # create_plots=True,
