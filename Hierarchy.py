@@ -48,8 +48,9 @@ class Node(NodeInformation, NodeMixin):
     specific information.
     """
 
-    def __init__(self, feature_set, n_samples, node_id, parent=None, childrens=None, n_classes=None, data=None,
-                 target=None, noisy_target=None, training_data=None, classes=None, class_occurences=None):
+    def __init__(self, node_id, parent=None,n_samples=None, childrens=None, n_classes=None, data=None,
+                 target=None,feature_set=None, noisy_target=None, training_data=None, classes=None,
+                 class_occurences=None):
         super(Node, self).__init__(feature_set=feature_set, n_samples=n_samples, n_classes=n_classes, data=data,
                                    target=target, training_data=training_data, classes=classes,
                                    class_occurences=class_occurences, noisy_target=noisy_target)
@@ -93,6 +94,9 @@ class Node(NodeInformation, NodeMixin):
     def __repr__(self):
         if self.classes:
             if self.gini:
+                if self.class_occurences:
+                    return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
+                           f" n_classes={self.n_classes}, classes={self.classes}, class_occurences={self.class_occurences}]"
                 # nice to see gini as well if we set it
                 return f"Level-{self.level};{self.node_id}[n_samples={self.n_samples}," \
                        f" n_classes={self.n_classes}, " \
@@ -313,12 +317,8 @@ def make_unbalance_hierarchy(root_node, level_cutoff, df_test, n_nodes_to_cutoff
         lambda x: assign_group_name(x, cutoff_node_ids, level_cutoff), axis=1)
     return root_node, df_test
 
-
-root = FlatHierarchy(hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy()).create_hierarchy(level_cutoff=2)
-#print(RenderTree(root))
-#exit()
+root = HardCodedHierarchy().create_hardcoded_hierarchy()
 nodes = [root]
-
 # test that classes and n_classes is the same in each node
 # this is only needed to test that the Hierarchy is not specified with some typos
 while True:
@@ -339,3 +339,9 @@ for node in product_group_nodes:
     print(f"len(node.class_occurences): {len(node.class_occurences)} == {node.n_classes}: node.n_classes")
     assert len(node.class_occurences) == node.n_classes
 """
+
+if __name__ == '__main__':
+    root = FlatHierarchy(hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy()).create_hierarchy(level_cutoff=1)
+    print(RenderTree(root))
+    #exit()
+    nodes = [root]

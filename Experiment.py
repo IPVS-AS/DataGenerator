@@ -29,7 +29,9 @@ def store_data_to_csv(df_train, df_test, data_output_directory, run_id):
 
 def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_values: list, total_runs: int,
                          imbalance_degree: str = "normal", output_dir: str = "",
-                         features_remove_percent_list=[0.2], unbalance_hierarchy=False, n_nodes_to_cutoff="all",
+                         features_remove_percent_list=[0.2],
+                         unbalance_hierarchy=False,
+                         n_nodes_to_cutoff="all",
                          level_cutoff=2):
     if imbalance_degree == 'all':
         imbalance_degrees = ImbalanceGenerator.imbalance_degrees

@@ -20,19 +20,20 @@ from sklearn.pipeline import Pipeline
 import concentrationMetrics as cm
 import pandas as pd
 
-from DataGenerator import ImbalanceGenerator
-from Utility import train_test_splitting, update_data_and_training_data
-from Utility import get_train_test_X_y
-from Hierarchy import HardCodedHierarchy, FlatHierarchy
+from DataGenerator.DataGenerator import ImbalanceGenerator
+from DataGenerator.Utility import train_test_splitting, update_data_and_training_data
+from DataGenerator.Utility import get_train_test_X_y
+from DataGenerator.Hierarchy import HardCodedHierarchy, FlatHierarchy
 
 random_forest_parameters = {'random_state': 1234,
-                            'n_estimators': 200, # put this in relation to number of samples/features?
+                            'n_estimators': 200,  # put this in relation to number of samples/features?
                             # 'n_jobs': -1
                             }
 
 from sklearn.exceptions import UndefinedMetricWarning
 
 warnings.filterwarnings('ignore', category=UndefinedMetricWarning)
+
 
 def gini(x):
     my_index = cm.Index()
@@ -97,11 +98,10 @@ class StatisticTracker:
                 # Todo: What is a good/best way to do this???
                 X = KNNImputer().fit_transform(data)
                 # = calinski_harabasz_score(X, labels)
-                #print(ch_score)
-                #avg_calinski += ch_score
-                #avg_dbi += davies_bouldin_score(X, labels)
-                #avg_sil += silhouette_score(X, labels)
-
+                # print(ch_score)
+                # avg_calinski += ch_score
+                # avg_dbi += davies_bouldin_score(X, labels)
+                # avg_sil += silhouette_score(X, labels)
 
                 if -1 in labels:
                     # there was OvA Binarization, do not use that for statistics
@@ -118,7 +118,7 @@ class StatisticTracker:
                 df = pd.DataFrame(data=data, columns=[f"F{i}" for i in range(data.shape[1])])
                 df = df.dropna(axis=1, how='all')
 
-                missing = df.isna().sum().sum()/(df.shape[0] * df.shape[1])
+                missing = df.isna().sum().sum() / (df.shape[0] * df.shape[1])
                 self.missing_features += missing
                 self.samples += data.shape[0]
                 self.features += data.shape[1]
@@ -130,7 +130,7 @@ class StatisticTracker:
         self.features = self.features / n_partitions
 
         self.avg_calinski = avg_calinski / n_partitions
-        self.dbi_score = avg_dbi/n_partitions
+        self.dbi_score = avg_dbi / n_partitions
         self.sil_score = avg_sil / n_partitions
 
     def get_stats_df(self):
@@ -194,11 +194,12 @@ class StatisticTracker:
 class ClassificationMethod:
     def __init__(self, classifier=RandomForestClassifier,
                  classifier_params=random_forest_parameters,
-                 partitioning=False, hierarchy_required=False, hierarchy=None):
+                 partitioning=False, hierarchy_required=False, hierarchy=None, run_id=1):
         self.classifier = classifier(**classifier_params)
         self.partitioning = partitioning
         self.hierarchy_required = hierarchy_required
         self.hierarchy = hierarchy
+        self.run_id = run_id
 
         # parameters such as p-quantile or gini
         self.parameters = {}
@@ -230,11 +231,10 @@ class ClassificationMethod:
     def track_stats(self):
         self.stats_tracker.track(self.partitions_for_node, partition=self.partitioning)
 
-    def get_accuracy_per_e_df(self, run_id):
+    def get_accuracy_per_e_df(self):
         """
         Returns a dataframe that contains the A@e and RA@e scores for this method.
         TO this end, it requires to already be fitted and made predictions.
-        :param run_id:
         :return: DataFrame that contains the A@e, RA@e scores as well as the method name, the run_id and
         the parameter values
         """
@@ -252,7 +252,7 @@ class ClassificationMethod:
             # RA@e is simply the sum of all correct predicted positions divided by the amount of correct predictions
             ra_at_e = sum(correct_predicted["correct_position"]) / len(correct_predicted)
 
-            acc_per_e = {"Method": self.name(), "R_e": e, "A@e": a_at_e, "RA@e": ra_at_e, "Run": run_id}
+            acc_per_e = {"Method": self.name(), "R_e": e, "A@e": a_at_e, "RA@e": ra_at_e, "Run": self.run_id}
             # add parameters for easier identification
             for parameter_key, parameter_value in self.parameters.items():
                 acc_per_e[parameter_key] = parameter_value
@@ -260,22 +260,22 @@ class ClassificationMethod:
             accuracies.append(acc_per_e)
         return pd.DataFrame(accuracies)
 
-    def get_predictions_df(self, run_id=1):
+    def get_predictions_df(self):
         predictions_df = self.stats_tracker.get_predictions_df()
-        predictions_df = self._add_parameters_method_run(predictions_df, run_id)
+        predictions_df = self._add_parameters_method_run(predictions_df)
         return predictions_df
 
-    def get_surrogates_df(self, run_id=1):
+    def get_surrogates_df(self):
         surrogates_df = self.stats_tracker.get_surrogates_df()
-        surrogates_df = self._add_parameters_method_run(surrogates_df, run_id)
+        surrogates_df = self._add_parameters_method_run(surrogates_df)
         return surrogates_df
 
-    def get_stats_df(self, run_id=1):
+    def get_stats_df(self):
         stats_df = self.stats_tracker.get_stats_df()
-        stats_df = self._add_parameters_method_run(stats_df, run_id)
+        stats_df = self._add_parameters_method_run(stats_df)
         return stats_df
 
-    def _add_parameters_method_run(self, df, run_id):
+    def _add_parameters_method_run(self, df):
         """
         Adds parameters, method_name and the run_id for this method to any Dataframe.
         Typically used as wrapper for statistics, predictions etc.
@@ -287,18 +287,18 @@ class ClassificationMethod:
         for parameter_key, parameter_value in self.parameters.items():
             df[parameter_key] = parameter_value
         df["Method"] = self.name()
-        df["Run"] = run_id
+        df["Run"] = self.run_id
         return df
 
 
 class RandomForestClassMethod(ClassificationMethod):
     def __init__(self, classifier=RandomForestClassifier,
                  classifier_params=random_forest_parameters,
-                 partitioning=False, hierarchy_required=False, hierarchy=None):
+                 partitioning=False, hierarchy_required=False, hierarchy=None, run_id=1):
         super(RandomForestClassMethod, self).__init__(classifier=classifier,
                                                       classifier_params=classifier_params,
                                                       partitioning=partitioning, hierarchy_required=hierarchy_required,
-                                                      hierarchy=hierarchy)
+                                                      hierarchy=hierarchy, run_id=run_id)
 
     @staticmethod
     def name():
@@ -317,7 +317,7 @@ class RandomForestClassMethod(ClassificationMethod):
     def predict(self, df_test, **kwargs):
         df_test_numeric = df_test.select_dtypes(include=np.float)
         X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
-        #X_test = df_test[[f"F{i}" for i in range(100)]]
+        # X_test = df_test[[f"F{i}" for i in range(100)]]
         X_test = self.imp.transform(X_test)
         return self.classifier.predict(X_test)
 
@@ -336,11 +336,11 @@ class RandomForestClassMethod(ClassificationMethod):
 class RandomForestBorutaMethod(RandomForestClassMethod):
     def __init__(self, classifier=RandomForestClassifier,
                  classifier_params=random_forest_parameters,
-                 partitioning=False, hierarchy_required=False, hierarchy=None):
+                 partitioning=False, hierarchy_required=False, hierarchy=None, run_id=1):
         super(RandomForestClassMethod, self).__init__(classifier=classifier,
                                                       classifier_params=classifier_params,
                                                       partitioning=partitioning, hierarchy_required=hierarchy_required,
-                                                      hierarchy=hierarchy)
+                                                      hierarchy=hierarchy, run_id=run_id)
 
     def fit(self, X_train, y_train):
         self.partitions_for_node = (X_train, y_train)
@@ -385,9 +385,9 @@ class RandomForestBorutaMethod(RandomForestClassMethod):
 class SPH(ClassificationMethod):
 
     def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), min_samples_per_class=1,
-                 max_info_loss=0.25, partitioning=True):
+                 max_info_loss=0.25, partitioning=True, run_id=1):
 
-        super(SPH, self).__init__(hierarchy=hierarchy, partitioning=partitioning)
+        super(SPH, self).__init__(hierarchy=hierarchy, partitioning=partitioning, run_id=run_id)
         self.max_info_loss = max_info_loss
         self.min_samples_per_class = min_samples_per_class
         self.parameters = {"max info loss": self.max_info_loss}
@@ -505,7 +505,7 @@ class SPH(ClassificationMethod):
                 test_group_df = df_test[df_test['group'] == group]
                 df_test_numeric = test_group_df.select_dtypes(include=np.float)
                 sample_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
-                #sample_data = test_group_df[[f"F{i}" for i in range(100)]].to_numpy()
+                # sample_data = test_group_df[[f"F{i}" for i in range(100)]].to_numpy()
                 y_pred = self._predict_test_data_for_group(sample_data, group)
                 labels = self.model_repository[group].classes_
                 y_test_group = test_group_df["target"].to_numpy()
@@ -565,10 +565,10 @@ class RFperGroup(SPH):
     We model RF per Group as SPH where the checks are always passed, i.e., we never go up in the hierarchy.
     """
 
-    def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), partitioning=True):
+    def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), partitioning=True, run_id=1):
         super(RFperGroup, self).__init__(hierarchy=hierarchy, partitioning=partitioning,
-                                         max_info_loss=np.NAN  # We do not need this parameter for this method
-                                         )
+                                         max_info_loss=np.NAN,  # We do not need this parameter for this method
+                                         run_id=run_id)
 
     def _SPH_checks(self, group_data, group_labels, min_samples_per_class=1, max_info_loss=0.25):
         # Always check passed! I.e., we do not go higher!
@@ -581,10 +581,10 @@ class RFperGroup(SPH):
 
 class SPHandCPI(SPH):
     def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), min_samples_per_class=1,
-                 max_info_loss=0.25, p_threshold=0.8, gini_threshold=0.3, partitioning=True):
+                 max_info_loss=0.25, p_threshold=0.8, gini_threshold=0.3, partitioning=True, run_id=1):
 
         self.sph = super(SPHandCPI, self).__init__(hierarchy=hierarchy, partitioning=partitioning,
-                                                   max_info_loss=max_info_loss)
+                                                   max_info_loss=max_info_loss, run_id=run_id)
         self.max_info_loss = max_info_loss
         self.min_samples_per_class = min_samples_per_class
 
@@ -809,9 +809,9 @@ class SPHandCPI(SPH):
 
 class CPI(SPHandCPI):
     def __init__(self, hierarchy=HardCodedHierarchy().create_hardcoded_hierarchy(), p_threshold=0.8,
-                 gini_threshold=0.3):
+                 gini_threshold=0.3, run_id=1):
         super(CPI, self).__init__(p_threshold=p_threshold, gini_threshold=gini_threshold, hierarchy=hierarchy,
-                                  partitioning=True)
+                                  partitioning=True, run_id=run_id)
         del self.parameters["max info loss"]
 
     def fit(self, X_train, y_train):
@@ -833,8 +833,8 @@ nan_replacement = -0.0001
 
 
 class ClusteringClassification(ClassificationMethod):
-    def __init__(self, clustering_algorithm="KMeans", clustering_parameters={"n_clusters": 10}):
-        super(ClusteringClassification, self).__init__(partitioning=True, hierarchy_required=False)
+    def __init__(self, clustering_algorithm="KMeans", clustering_parameters={"n_clusters": 10}, run_id=1):
+        super(ClusteringClassification, self).__init__(partitioning=True, hierarchy_required=False, run_id=run_id)
         if clustering_algorithm in CLUSTERING_MAP:
             self.clustering_algorithm = CLUSTERING_MAP[clustering_algorithm]
         self.clustering_name = clustering_algorithm
@@ -892,7 +892,7 @@ class ClusteringClassification(ClassificationMethod):
 
             df_test_numeric = cluster_test_samples.select_dtypes(include=np.float)
             cluster_test_data = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
-            #cluster_test_data = cluster_test_samples[[f"F{i}" for i in range(100)]]
+            # cluster_test_data = cluster_test_samples[[f"F{i}" for i in range(100)]]
             true_labels = cluster_test_samples["target"].to_numpy()
             y_probas = clf_model.predict_proba(cluster_test_data)
 
@@ -915,9 +915,10 @@ class KMeansClassification(ClusteringClassification):
 
 
 class GMMClassification(ClusteringClassification):
-    def __init__(self, n_components):
+    def __init__(self, n_components, run_id=1):
         super(GMMClassification, self).__init__(clustering_algorithm="GMM",
-                                                clustering_parameters={"n_components": n_components})
+                                                clustering_parameters={"n_components": n_components},
+                                                run_id=run_id)
 
     @staticmethod
     def name():
@@ -925,9 +926,10 @@ class GMMClassification(ClusteringClassification):
 
 
 class BirchClassification(ClusteringClassification):
-    def __init__(self, n_clusters):
+    def __init__(self, n_clusters, run_id=1):
         super(BirchClassification, self).__init__(clustering_algorithm="Birch",
-                                                  clustering_parameters={"n_clusters": n_clusters})
+                                                  clustering_parameters={"n_clusters": n_clusters},
+                                                  run_id=run_id)
 
     @staticmethod
     def name():
@@ -941,22 +943,22 @@ CLUSTERING_MAP = {
 }
 
 if __name__ == '__main__':
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(root=None, low_high_split=(0.3, 0.7))
+    generator = ImbalanceGenerator(root=None, low_high_split=(0.3, 0.7))
+    df = generator.generate_data_with_product_hierarchy()
     print(RenderTree(generator.root))
     print(len(df))
     print(gini(df["target"]))
 
-    df_train, df_test = train_test_split(df,train_size=0.7, stratify=df["group"])
-    #root, df_test= make_unbalance_hierarchy(df_test=df_test, level_cutoff=2, root_node=generator.root,
+    df_train, df_test = train_test_split(df, train_size=0.7, stratify=df["group"])
+    # root, df_test= make_unbalance_hierarchy(df_test=df_test, level_cutoff=2, root_node=generator.root,
     #                                        n_nodes_to_cutoff=2)
-    #print(RenderTree(root))
+    # print(RenderTree(root))
 
     rf_classifier = RandomForestClassMethod()
     rf_classifier.fit(df_train[[f"F{i}" for i in range(100)]], df_train["target"])
     rf_classifier.predict_test_samples(df_test)
-    print(rf_classifier.get_accuracy_per_e_df(run_id=1))
-    print(rf_classifier.get_stats_df(run_id=1))
+    print(rf_classifier.get_accuracy_per_e_df())
+    print(rf_classifier.get_stats_df())
     print(gini(df["target"]))
 
     exit()
@@ -1006,17 +1008,17 @@ if __name__ == '__main__':
     missing = 0.5
 
     for imbalance_degree in imb_degrees:
-        n_train_samples = n_samples * (750/1050)
+        n_train_samples = n_samples * (750 / 1050)
 
-        generator = ImbalanceGenerator()
-        data_df = generator.generate_data_with_product_hierarchy(imbalance_degree=imbalance_degree,
-                                                                 root=FlatHierarchy().create_hierarchy(),
-                                                                 n_samples_total=n_samples, n_features=n_features,
-                                                                 features_remove_percent=missing)
+        generator = ImbalanceGenerator(imbalance_degree=imbalance_degree,
+                                       root=FlatHierarchy().create_hierarchy(),
+                                       n_samples_total=n_samples, n_features=n_features,
+                                       features_remove_percent=missing)
+        data_df = generator.generate_data_with_product_hierarchy()
         n_classes = len(data_df["target"].unique())
         n_samples = len(data_df)
         n_features_generated = data_df.shape[1]
-        missing = data_df.isna().sum().sum()/(data_df.shape[0] * data_df.shape[1])
+        missing = data_df.isna().sum().sum() / (data_df.shape[0] * data_df.shape[1])
         print(f"n classes: {n_classes}")
         print(f"n samples: {n_samples}")
         print(f"n features: {n_features_generated}")
@@ -1050,10 +1052,10 @@ if __name__ == '__main__':
         rf_instance = RandomForestClassMethod()
         rf_instance.fit(X_train, y_train)
         rf_instance.predict_test_samples(df_test)
-        clustering_df = rf_instance.get_accuracy_per_e_df(run_id=1)
+        clustering_df = rf_instance.get_accuracy_per_e_df()
         print(clustering_df)
-        stats_df = rf_instance.get_stats_df(run_id=1)
-        predictions_df = rf_instance.get_predictions_df(run_id=1)
+        stats_df = rf_instance.get_stats_df()
+        predictions_df = rf_instance.get_predictions_df()
 
         for method in METHODS:
             parameter_dicts = methods_to_parameters[method.name()]
@@ -1063,16 +1065,16 @@ if __name__ == '__main__':
                 method_instance = method(**dict(zip(parameter_dicts, parameter_vals)))
                 method_instance.fit(X_train, y_train)
                 method_instance.predict_test_samples(df_test)
-                accuracy_df = method_instance.get_accuracy_per_e_df(run_id=1)
+                accuracy_df = method_instance.get_accuracy_per_e_df()
                 print(accuracy_df)
 
                 method_instance.track_stats()
-                stats = method_instance.get_stats_df(run_id=1)
+                stats = method_instance.get_stats_df()
 
                 clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
                 stats_df = pd.concat([stats_df, stats])
 
-                predictions = method_instance.get_predictions_df(run_id=1)
+                predictions = method_instance.get_predictions_df()
                 predictions_df = pd.concat([predictions_df, predictions])
 
             clustering_df.to_csv(output_directoy + f"{imbalance_degree}/acc.csv")

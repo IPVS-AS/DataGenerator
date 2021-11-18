@@ -1,0 +1,2 @@
+#Samples,missing,#Features,#Classes,Gini,#SPH,#CPI,CHI,SIL,DBI,Method,Run,n,f
+750.0,0.23869333333333334,50.0,84.0,0.5346031746031745,0,0,0.0,0.0,0.0,RF,1,1050,50

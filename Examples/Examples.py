@@ -1,152 +1,80 @@
 import random
-from collections import Counter
-
 import numpy as np
-import concentrationMetrics as cm
 
 from anytree import RenderTree
 
+from DataGenerator.ClassificationPartitioningMethods import RandomForestClassMethod, KMeansClassification, \
+    BirchClassification
 from DataGenerator.DataGenerator import ImbalanceGenerator
-from DataGenerator.Hierarchy import FlatHierarchy
-from DataGenerator.Utility import train_test_splitting
-
-if __name__ == '__main__':
-    from sklearn.tree import DecisionTreeClassifier, plot_tree
-    import matplotlib.pyplot as plt
-
-
-    def gini(x):
-        my_index = cm.Index()
-        class_frequencies = np.array(list(Counter(x).values()))
-        return my_index.gini(class_frequencies)
-
-
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(root=None, imbalance_degree="normal", n_samples_total=1000)
-    X = df[[f"F{i}" for i in range(100)]].to_numpy()
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
-    # Render the hierarchy
-    print(RenderTree(generator.root))
-    print(gini_value)
-    print(df.isna().sum())
-
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------------Example with noisy Data --------------------------------')
-    from dcm import dcm
-
-    generator = ImbalanceGenerator()
-    # of course this also works with different noise levels and different imbalance degrees
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal", noise=0.0, n_samples_total=10000,
-                                                        root=FlatHierarchy().create_hierarchy())
-    root = generator.root
-    X = df[[f"F{i}" for i in range(100)]].to_numpy()
-    y_true = df['target'].to_numpy()
-    y_nois = df['noisy target']
-    noisyCount = np.count_nonzero((y_true == y_nois) == False)
-    print(noisyCount)
-    gini_value = gini(y_true)
-    # Render the hierarchy
-    print(RenderTree(root))
-    # noisy labels
-    # actual labels
-    print(df['target'])
-    exit()
-
-    print('----------------------------------------------------------------------------------------')
-    print(len(df))
-
-    for group in df["group"].unique():
-        group_df = df[df["group"] == group]
-        print(f"group {group} has {len(group_df)} samples")
-    exit()
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------------Very Low Imbalance Degree --------------------------------')
+from DataGenerator.Utility import train_test_splitting, get_train_test_X_y
 
 
 
+#### Very Important! #####
+# Data Generation is based on randomness, so we should set random seeds such that the results are reproducible!
+np.random.seed(0)
+random.seed(0)
 
-    np.random.seed(10 * 5)
-    random.seed(10 * 10)
-    imb_to_one_sample_class = {}
-    imb_to_one_sample_count = {imb: 0 for imb in ImbalanceGenerator.imbalance_degrees}
+# Parameters for Data generation
+n_features = 100
+n_samples = 1000
+n_classes = 84
 
-    for imb in ImbalanceGenerator.imbalance_degrees:
-        generator = ImbalanceGenerator()
-        df = generator.generate_data_with_product_hierarchy(imbalance_degree=imb)
-        root = generator.root
-        y_true = df['target'].to_numpy()
-        gini_value = gini(y_true)
-        print(RenderTree(root))
-        print(f'Gini index for whole data is: {gini_value}')
-        df, _ = train_test_splitting(df, n_train_samples=750)
+# First of all, we instantiate an imbalance generator. We leave the parameters as "default" parameters.
+generator = ImbalanceGenerator(n_features=n_features, n_samples_total=n_samples, imbalance_degree="normal", root=None,
+                               total_n_classes=n_classes)
 
-        average_one_samples = 0
-        for group in df['group'].unique():
-            group_targets = df[df['group'] == group]['target'].value_counts()
-            group_targets_dic = dict(group_targets)
-            print(group_targets_dic)
-            group_targets_dic = {k: v for k, v in group_targets_dic.items() if v == 1}
+# Then we generate the data. The result is a dataframe. The actual features of the dataset are contained in the columns
+# F0, F1, ..., F{n_features - 1}
+# The classes are contained in the column "target" and we also have attributes for the different levels of the hierarchy
+df = generator.generate_data_with_product_hierarchy()
 
-            average_one_samples += len(group_targets_dic) / sum(group_targets)
-            imb_to_one_sample_count[imb] += len(group_targets_dic) / len(group_targets)
+# We can also access the generated hierarchy via the root attribute of the generator instance
+hierarchy_root = generator.root
 
-        average_one_samples = average_one_samples / len(df['group'].unique())
-        imb_to_one_sample_class[imb] = average_one_samples
+# Then we can also print the hierarchy
+print(RenderTree(hierarchy_root))
 
-    print(imb_to_one_sample_count)
-    print(imb_to_one_sample_class)
+# Now we do the train/test split. We want 75% as training samples
+df_train, df_test = train_test_splitting(df, n_train_samples=int(0.75*n_samples))
 
-    exit()
-    print('----------------------------------------------------------------------------------------')
+# Transform to X_train, X_test and y_train, y_test
+X_train, X_test, y_train, y_test = get_train_test_X_y(df_train=df_train, df_test=df_test, n_features=n_features)
 
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------------Low Imbalance Degree -------------------------------------')
+# Now we train our model by running clustering and then train a Random Forest on each cluster.
+n_clusters = 20
+rf_classif_method = KMeansClassification(n_clusters=n_clusters)
+# There are at the moment 3 different clustering methods that can be used in the same way.
+# However, yet this is only possible because they have the same parameter "k".
+# >> rf_classif_method = BirchClassification(n_clusters=n_clusters)
+# >> rf_classif_method = GMMClassification(n_clusters=n_clusters)
+rf_classif_method.fit(X_train, y_train)
 
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="low")
-    root = generator.root
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
-    print(RenderTree(root))
-    print(f'Gini index for whole data is: {gini_value}')
-    print('----------------------------------------------------------------------------------------')
+# Predict test samples. We use df_test and not y_test, because for SPH we also need the info of the hierarchy.
+# However, we want a unique interface. This functions returns dictionary of top-e accuracy (A@e).
+rf_classif_method.predict_test_samples(df_test=df_test)
+top_e_accuracy = rf_classif_method.get_accuracy_per_e_df()
+print("-------------------------------------")
+print("Top-K Accuracy:")
+print(top_e_accuracy)
+print("-------------------------------------")
 
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------------Normal Imbalance Degree -------------------------------------')
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="normal")
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
+# We can also access further statistics.
+# Holds information about samples, classes features, missing features etc. per cluster
+stats_df = rf_classif_method.get_stats_df()
+print("-------------------------------------")
+print("Statistics:")
+print(stats_df)
+print("-------------------------------------")
 
-    root = generator.root
-    print(RenderTree(root))
-    print(f'Gini index for whole data is: {gini_value}')
-    print('----------------------------------------------------------------------------------------')
+# We can even get the prediction for each separate sample.
+# Here, the column "correct_position" defines if the class is predicted correctly at first, second, ... k-th try.
+# A "0" means that the class is not predicted within the default range (10).
+predictions_df = rf_classif_method.get_predictions_df()
+print("-------------------------------------")
+print("Predictions:")
+print(predictions_df)
+print("-------------------------------------")
 
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------------High Imbalance Degree -------------------------------------')
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="high")
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
 
-    root = generator.root
-    print(RenderTree(root))
-    print(f'Gini index for whole data is: {gini_value}')
-    print('----------------------------------------------------------------------------------------')
-
-    print('----------------------------------------------------------------------------------------')
-    print('------------------------Very High Imbalance Degree -------------------------------------')
-    generator = ImbalanceGenerator()
-    df = generator.generate_data_with_product_hierarchy(imbalance_degree="very_high")
-    y_true = df['target'].to_numpy()
-    gini_value = gini(y_true)
-
-    root = generator.root
-    print(RenderTree(root))
-    print(f'Gini index for whole data is: {gini_value}')
-    counter = Counter(df["target"].to_numpy())
-    counter_one = {t: counter[t] for t in counter.keys() if counter[t] == 1}
-    print(f"number of classes that have only one sample: {counter_one}")
-    print('----------------------------------------------------------------------------------------')
+# For further usage of running multiple methods, you can also have a look at the Experiment.py file.

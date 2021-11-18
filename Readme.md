@@ -2,7 +2,7 @@
 
 In this repo, there are actually three parts implemented: (1) The data generator (see `DataGenerator.py`), (2) the definition of 
 a hierarchy (see `Hierarchy.py`) and (3) an approach for partitioning data and running a machine learning algorithm on each 
-partition separately (see `Hirsch_et_al_Approach.py`).
+partition separately (see `ClassificationPartitioningMethods.py`).
 
 ### The data generator
 
@@ -21,11 +21,13 @@ in each node and also to add/remove nodes or even levels.
 
 ### Partitioning Data and Machine Learning 
 
-The file `Hirsch_et_al_Approach.py` contains the approach from Hirsch et al. 
+The file `ClassificationPartitioningMethods.py` contains the approach from Hirsch et al.
+Yet, it also includes some methods for using specific clsutering algorithms (K-Means, Birch, GMM).
 The details of this approach are not important, however,
 there are certain parameters that are required for this approach and that should be able to specify.
 The parameters can be found in the file, they are there specified via a command line interface.
 There is also an example how the measurements are performed at the moment depending on the specified parameters.
+You can have a look at the `Experiment.py` file for this
 
 
 ### Examples of data and results of current measurements
@@ -93,6 +95,8 @@ hiearchy_root = generator.root
 # We can also basically print the hierarchy on the console
 print(RenderTree(hiearchy_root))
 ````
+
+Also Have a look at the Examples.py file! There is an example on how to use a clustering method and retrieving the results.
 
 
 
