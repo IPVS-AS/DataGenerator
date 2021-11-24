@@ -77,14 +77,14 @@ from DataGenerator.Hierarchy import HardCodedHierarchy
 # We need the RenderTree here to print the tree on the console
 from anytree import RenderTree
 
-# create an ImbalanceGenerator object 
-generator = ImbalanceGenerator()
-
 # we use the hardcoded hierarchy
 root = HardCodedHierarchy().create_hardcoded_hierarchy()
 
+# create an ImbalanceGenerator object 
+generator = ImbalanceGenerator(root=root)
+
 # generate the dataset
-df = generator.generate_data_with_product_hierarchy(root=root)
+df = generator.generate_data_with_product_hierarchy()
 
 # show the resulting dataframe
 print(df.head())

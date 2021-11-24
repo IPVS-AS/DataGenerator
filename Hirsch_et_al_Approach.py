@@ -1250,6 +1250,9 @@ if __name__ == '__main__':
         0.35,
         0.4
     ]
+    cm_vals = [
+        0.4
+    ]
 
     p_quantile = [
         0.7,
@@ -1259,7 +1262,13 @@ if __name__ == '__main__':
         0.9
     ]
 
+    p_quantile = [
+        0.9
+    ]
+
     max_info_loss_values = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+    max_info_loss_values = [0.35]
+
     ###############################################################
 
     ###############################################################
@@ -1307,6 +1316,7 @@ if __name__ == '__main__':
     p_quantile = args.p_thresholds
 
     total_runs = args.runs
+    total_runs = 1
     runs = range(1, total_runs + 1, 1)
     ###############################################################
 
@@ -1346,7 +1356,8 @@ if __name__ == '__main__':
 
             n_features = 100
             n_samples = 1050
-            generator = ImbalanceGenerator()
+            root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
+            generator = ImbalanceGenerator(root=root_node,imbalance_degree=imbalance_degree)
 
             generation_mechanism = "hardcoded"
             # generation_mechanism = "default"
@@ -1363,7 +1374,6 @@ if __name__ == '__main__':
                                        sep=';')
                 df_test = pd.read_csv(f"{data_output_directory}/test_{generation_mechanism}_{run_id}.csv", sep=';')
                 data_df = pd.concat([df_train, df_test])
-                root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
 
             else:
                 ###############################################################
@@ -1373,8 +1383,7 @@ if __name__ == '__main__':
                 else:
                     root_node = None
 
-                data_df = generator.generate_data_with_product_hierarchy(root=root_node,
-                                                                         imbalance_degree=imbalance_degree)
+                data_df = generator.generate_data_with_product_hierarchy()
                 ###############################################################
 
                 # split in training and test data
@@ -1728,5 +1737,5 @@ if __name__ == '__main__':
                         print(f"    after SPH+CPI: {acc_vitali}")
                         print(f"avg: {sum(acc_vitali.values()) / len(acc_vitali.values())}")
 
-                        result_df.to_csv(f"{result_output_directory}/{concentration_measure}_accuracy_all_runs.csv",
-                                         index=False)
+                        #result_df.to_csv(f"{result_output_directory}/{concentration_measure}_accuracy_all_runs.csv",
+                        #                 index=False)

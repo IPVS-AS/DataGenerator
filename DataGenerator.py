@@ -19,7 +19,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, classifi
     precision_recall_fscore_support
 from sklearn.model_selection import train_test_split
 
-from DataGenerator.Hierarchy import Node, HardCodedHierarchy, FlatHierarchy, make_unbalance_hierarchy
+from Hierarchy import Node, HardCodedHierarchy, FlatHierarchy, make_unbalance_hierarchy
 import concentrationMetrics as cm
 
 

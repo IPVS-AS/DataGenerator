@@ -3,10 +3,10 @@ import numpy as np
 
 from anytree import RenderTree
 
-from DataGenerator.ClassificationPartitioningMethods import RandomForestClassMethod, KMeansClassification, \
+from ClassificationPartitioningMethods import RandomForestClassMethod, KMeansClassification, \
     BirchClassification
-from DataGenerator.DataGenerator import ImbalanceGenerator
-from DataGenerator.Utility import train_test_splitting, get_train_test_X_y
+from DataGenerator import ImbalanceGenerator
+from Utility import train_test_splitting, get_train_test_X_y
 
 
 

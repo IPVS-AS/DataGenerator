@@ -20,10 +20,10 @@ from sklearn.pipeline import Pipeline
 import concentrationMetrics as cm
 import pandas as pd
 
-from DataGenerator.DataGenerator import ImbalanceGenerator
-from DataGenerator.Utility import train_test_splitting, update_data_and_training_data
-from DataGenerator.Utility import get_train_test_X_y
-from DataGenerator.Hierarchy import HardCodedHierarchy, FlatHierarchy
+from DataGenerator import ImbalanceGenerator
+from Utility import train_test_splitting, update_data_and_training_data
+from Utility import get_train_test_X_y
+from Hierarchy import HardCodedHierarchy, FlatHierarchy
 
 random_forest_parameters = {'random_state': 1234,
                             'n_estimators': 200,  # put this in relation to number of samples/features?
