@@ -10,6 +10,7 @@ from anytree import RenderTree, PreOrderIter
 from scipy.stats import boltzmann, zipfian, dlaplace, poisson, zipf
 from skclean.simulate_noise import flip_labels_uniform
 from sklearn.datasets import make_classification, make_blobs
+from itertools import zip_longest
 
 import numpy as np
 import pandas as pd
@@ -65,7 +66,8 @@ class ImbalanceGenerator:
 
     def __init__(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
                  features_remove_percent=0.2, imbalance_degree="normal",
-                 root=HardCodedHierarchy().create_hardcoded_hierarchy(), noise=0,
+                 root=HardCodedHierarchy().create_hardcoded_hierarchy(),
+                 noise=0,
                  low_high_split=(0.3, 0.7),
                  distribution=zipfian.rvs,
                  random_state=1234):
@@ -542,44 +544,20 @@ class ImbalanceGenerator:
                 continue
 
             n_children = len(node.children)
-            if n_children == 2:
-                splitting = [self.low_split, self.high_split]
-            elif n_children == 3:
-                splitting = [self.low_split * self.low_split, self.low_split * self.high_split, self.high_split]
-                """
-                if j % 2 == 1:
-                    splitting = [low_split * 1 / 3, low_split * 2 / 3, high_split]
-                else:
-                    splitting = [low_split, high_split * 1 / 3, high_split * 2 / 3]
-                """
-            elif n_children == 4:
-                splitting = [self.low_split * self.low_split, self.low_split * self.high_split,
-                             self.high_split * self.low_split,
-                             self.high_split * self.high_split]
-            elif n_children == 5:
-                splitting = [self.low_split / 3, self.low_split / 3, self.low_split / 3, self.high_split * 1 / 2,
-                             self.high_split / 2]
-            elif n_children == 6:
-                splitting = [self.low_split / 3, self.low_split / 3, self.low_split / 3, self.high_split / 3,
-                             self.high_split / 3,
-                             self.high_split / 3]
+            min_samples_per_node = [2 for i in range(n_children)]
+            remaining_samples = node.n_samples - sum(min_samples_per_node)
+            samples_count = zipfian.rvs(a=1.5, size=remaining_samples, n=n_children)
+            samples_count = list(Counter(samples_count).values())
+            samples_count = [x+y for x,y in zip_longest(min_samples_per_node, samples_count, fillvalue=0)]
+            samples_per_node = sorted(samples_count)
 
-            remaining_samples = node.n_samples - (len(range(n_children)) * 1)
-            # determine samples for each node
-            samples_per_node = [1 + int(splitting[i] * remaining_samples) for i in range(n_children)]
+            classes_count = zipfian.rvs(a=1, size=int(node.n_classes * 1.5), n=n_children)
+            n_classes_per_node = list(Counter(classes_count).values())
 
-            # due to rounding errors there are samples missing, add them randomly
-            while sum(samples_per_node) < node.n_samples:
-                max_index = np.argmax(samples_per_node)
-                samples_per_node[max_index] += 1
+            if len(n_classes_per_node) < n_children:
+                n_classes_per_node.extend([2 for i in range(n_children - len(n_classes_per_node))])
 
-            ###### Determine number of classes for each node ####################
-            weight_interval = [1 + .7 / i for i in range(1, n_children + 1)]
-
-            # Assign the number of classes for the nodes based on the number of samples,
-            # number of classes from parent and the splitting percentage
-            n_classes_per_node = [math.floor(splitting[i] * node.n_classes * weight_interval[i]) for i in
-                                  range(n_children)]
+            n_classes_per_node = sorted(n_classes_per_node)
 
             ### Features per child node ##################################
             n_levels = self.root.height
@@ -649,11 +627,11 @@ class ImbalanceGenerator:
         for node in group_nodes:
             n_samples = node.n_samples
 
-            if n_samples < median_samples:
-                class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
-            else:
+            #if n_samples < median_samples:
+            class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
+            #else:
                 # Each class should occur at least twice
-                class_occurences = [max(2, 2 * int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
+             #   class_occurences = [max(2, 2 * int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
 
             remaining_samples = n_samples - sum(class_occurences)
 
@@ -677,12 +655,13 @@ class ImbalanceGenerator:
                 #class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
                 remaining_samples = n_samples - sum(class_occurences)
 
-                drawn_class_occurences = self.cls_prob_distribution(distribution_parameter, node.n_classes,
-                                                                    size=remaining_samples,
-                                                                    random_state=self.random_state)
                 print(class_occurences)
                 print(remaining_samples)
                 print(node.n_samples)
+                drawn_class_occurences = self.cls_prob_distribution(distribution_parameter,
+                                                                    node.n_classes,
+                                                                    size=remaining_samples,
+                                                                    random_state=self.random_state)
                 print(drawn_class_occurences)
                 drawn_class_occurences = list(Counter(drawn_class_occurences).values())
                 for i, d_cls_occ in enumerate(drawn_class_occurences):
@@ -779,9 +758,10 @@ if __name__ == '__main__':
     result_for_imb = {}
 
     for imb in ImbalanceGenerator.imbalance_degrees:
-        #if imb != "normal":
-        #    continue
-        generator = ImbalanceGenerator(root=None, n_samples_total=1000,
+        if imb != "normal":
+            continue
+        generator = ImbalanceGenerator(root=None, # describes the used taxonomy using an anytree instance
+                                       n_samples_total=1000,
                                        imbalance_degree=imb,
                                        low_high_split=(0.3, 0.7),
                                        random_state=1234,
@@ -791,7 +771,9 @@ if __name__ == '__main__':
             # distribution=boltzmann.rvs
         )
         print(RenderTree(generator.root))
+        exit()
         print(len(df))
+
         from imblearn.over_sampling import SMOTE
         from imblearn.ensemble import BalancedRandomForestClassifier
 
