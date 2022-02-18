@@ -6,7 +6,7 @@ from itertools import product
 
 from anytree import PreOrderIter, RenderTree
 
-from ClassificationPartitioningMethods import SPHandCPI, SPH, RandomForestClassMethod, RandomForestBorutaMethod, CPI, \
+from SPH_CPI import SPHandCPI, SPH, RandomForestClassMethod, RandomForestBorutaMethod, CPI, \
     random_forest_parameters, KMeansClassification, GMMClassification, BirchClassification, RFperGroup
 
 import pandas as pd
@@ -15,7 +15,7 @@ import numpy as np
 from DataGenerator import ImbalanceGenerator
 
 from Utility import train_test_splitting, update_data_and_training_data, get_train_test_X_y
-from Hierarchy import HardCodedHierarchy, FlatHierarchy, HIERARCHY_TYPES, make_unbalance_hierarchy
+from Hierarchy import HardCodedHierarchy, HIERARCHY_TYPES
 
 from sklearn.exceptions import UndefinedMetricWarning
 
@@ -29,10 +29,7 @@ def store_data_to_csv(df_train, df_test, data_output_directory, run_id):
 
 def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_values: list, total_runs: int,
                          imbalance_degree: str = "normal", output_dir: str = "",
-                         features_remove_percent_list=[0.2],
-                         unbalance_hierarchy=False,
-                         n_nodes_to_cutoff="all",
-                         level_cutoff=2):
+                         features_remove_percent_list=[0.2],):
     if imbalance_degree == 'all':
         imbalance_degrees = ImbalanceGenerator.imbalance_degrees
     else:
@@ -52,13 +49,8 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
         ##############################################################################################
         ################ Setting up output directories based on imbalance degree #####################
         # Default for directories, append the output_directory
-        if output_dir == "":
-            out_dir = f"imbalance_degree/{imbalance_degree}/"
-        else:
-            out_dir = f"{output_dir}/imbalance_degree/{imbalance_degree}/"
-
-        data_output_directory = f"{out_dir}/data"
-        result_output_directory = f"{out_dir}/result"
+        data_output_directory = f"data/"
+        result_output_directory = f"results/"
 
         if not os.path.exists(data_output_directory):
             os.makedirs(data_output_directory)
@@ -73,23 +65,18 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
                 for features_remove_percent in features_remove_percent_list:
                     print(features_remove_percent)
                     for run_id in runs:
-                        # maybe change back to 5?
-                        np.random.seed(run_id * 10)
-                        random.seed(run_id * 10)
+                        # Random seed for reproducibility
+                        np.random.seed(run_id * 100)
+                        random.seed(run_id * 100)
 
                         root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
 
-                        if hierarchy_type == "flat":
-                            root_node = FlatHierarchy().create_hierarchy(level_cutoff=level_cutoff)
-                        elif hierarchy_type == "auto":
-                            root_node = None
-
-                        generator = ImbalanceGenerator()
-                        data_df = generator.generate_data_with_product_hierarchy(root=root_node,
-                                                                                 imbalance_degree=imbalance_degree,
-                                                                                 n_features=n_features,
-                                                                                 n_samples_total=n_samples,
-                                                                                 features_remove_percent=features_remove_percent)
+                        generator = ImbalanceGenerator(root=root_node,
+                                                       imbalance_degree=imbalance_degree,
+                                                       n_features=n_features,
+                                                       n_samples_total=n_samples,
+                                                       features_remove_percent=features_remove_percent)
+                        data_df = generator.generate_data_with_product_hierarchy()
                         root_node = generator.root
 
                         # Train/Test split and update data in the hierarchy
@@ -98,10 +85,6 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
                         root_node = update_data_and_training_data(root_node, df_train, data_df, n_features=n_features)
                         X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=n_features)
 
-                        if unbalance_hierarchy:
-                            root_node, df_test = make_unbalance_hierarchy(root_node, level_cutoff, n_nodes_to_cutoff,
-                                                                          df_test)
-                            print(RenderTree(root_node))
                         # Dictionary of parameters for the different methods
                         methods_to_parameters = {
                             RFperGroup.name(): {"hierarchy": [root_node]},
@@ -133,11 +116,11 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
                                 method_instance.predict_test_samples(df_test)
 
                                 # 4.) Retrieve accuracy Results (A@e and RA@e)
-                                accuracy_per_e_df = method_instance.get_accuracy_per_e_df(run_id)
+                                accuracy_per_e_df = method_instance.get_accuracy_per_e_df()
                                 print(accuracy_per_e_df)
 
                                 # 5.) We also get the detailed predictions if we want to make further analysis
-                                predictions_df = method_instance.get_predictions_df(run_id)
+                                predictions_df = method_instance.get_predictions_df()
 
                                 # 6.) Save statistics about the dataset and the methods
                                 # track statistics
@@ -145,7 +128,7 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
                                 # retrieve method stats and store parameter values
                                 method_stats_df = method_instance.get_stats_df()
 
-                                surrogates = method_instance.get_surrogates_df(run_id)
+                                surrogates = method_instance.get_surrogates_df()
 
                                 for df in [predictions_df, method_stats_df, surrogates, accuracy_per_e_df]:
                                     # add n instances and features to each dataframe
@@ -167,13 +150,11 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
 
                                 # Todo: Maybe store each method run separately?! Instead of large csv files?
                                 #  also store instances, features and hierarchy name in filename/directory?
-                                acc_result_df.to_csv(result_output_directory + "/gini_accuracy_all_runs.csv",
+                                acc_result_df.to_csv(result_output_directory + f"/{imbalance_degree}_accuracy.csv",
                                                      index=False)
-                                stats_result_df.to_csv(result_output_directory + "/gini_stats.csv", index=False)
-                                detailed_predictions_df.to_csv(result_output_directory + "/predictions.csv",
+                                stats_result_df.to_csv(result_output_directory + f"/{imbalance_degree}_stats.csv", index=False)
+                                detailed_predictions_df.to_csv(result_output_directory + f"/{imbalance_degree}_predictions.csv",
                                                                index=False)
-                                surrogates_df.to_csv(result_output_directory + "/surrogates.csv", index=False)
-
 
 if __name__ == '__main__':
 
@@ -291,22 +272,12 @@ if __name__ == '__main__':
     ###############################################################
     ######### Run Machine Learning Magic ##########################
     run_machine_learning(
-        # generate_data=True,
-        # PC stuff?
-        # hierarchy=None,
-        # dg_result=None,
-        # dg_run=None,
-        # new, instead of cm_vals:
         gini_thresholds=gini_thresholds,
-        # cm_vals=cm_vals,
         p_quantile=p_quantile,
         max_info_loss_values=max_info_loss_values,
         total_runs=total_runs,
         imbalance_degree=imbalance_degree,
         output_dir=out_dir,
         features_remove_percent_list=features_remove_percent
-        # concentration_measure=concentration_measure,
-        # run_cpi_no_parameters=run_cpi_no_parameters,
-        # create_plots=True,
     )
     ###############################################################

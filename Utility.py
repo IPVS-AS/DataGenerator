@@ -98,7 +98,7 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     return train, test
 
 
-def update_data_and_training_data(root_node, df_train, data_df, n_features=100):
+def update_data_and_training_data(root_node, df_train, n_features=100):
     product_group_nodes = [node for node in PreOrderIter(root_node) if not node.children]
 
     for group_node in product_group_nodes:
@@ -109,18 +109,12 @@ def update_data_and_training_data(root_node, df_train, data_df, n_features=100):
         train_data = df_train[df_train["group"] == node_id][[f"F{i}" for i in range(n_features)]].to_numpy()
         training_labels = df_train[df_train["group"] == node_id]["target"].to_numpy()
 
-        data = data_df[data_df["group"] == node_id][[f"F{i}" for i in range(n_features)]].to_numpy()
-        labels = data_df[data_df["group"] == node_id]["target"].to_numpy()
 
         group_node.training_data = train_data
         group_node.training_labels = training_labels
 
-        # also set the "normal" data and labels
+        # also set the "medium" data and labels
         # These are more than the training data and in case we already created a dataset, we want to set them as well
-        group_node.data = data
-        group_node.target = labels
-
-        # print(f"Length of training data: {len(train_data)} and length of group node training data: {len(group_node.training_data)}")
 
         # pass training data upwards the whole tree
         traverse_node = group_node

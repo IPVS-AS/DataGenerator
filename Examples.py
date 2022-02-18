@@ -3,7 +3,7 @@ import numpy as np
 
 from anytree import RenderTree
 
-from ClassificationPartitioningMethods import RandomForestClassMethod, KMeansClassification, \
+from SPH_CPI import RandomForestClassMethod, KMeansClassification, \
     BirchClassification
 from DataGenerator import ImbalanceGenerator
 from Utility import train_test_splitting, get_train_test_X_y

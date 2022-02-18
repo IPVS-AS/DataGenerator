@@ -48,7 +48,7 @@ class ImbalanceGenerator:
     or you do not specify a hierarchy and then a 'default' one is generated.
     Yet, for both ways, the groups (or the actual data) is generated based on the specification in the same way.
     """
-    imbalance_degrees = ['very_low', 'low', 'normal', 'high', 'very_high']
+    imbalance_degrees = ['very_balanced', 'balanced', 'medium', 'imbalanced', 'very_imbalanced']
 
     # Not used yet. At the moment we simply use the function from scipy as parameter. That way we do not need mappings
     # for each distribution
@@ -65,7 +65,7 @@ class ImbalanceGenerator:
     }
 
     def __init__(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                 features_remove_percent=0.2, imbalance_degree="normal",
+                 features_remove_percent=0.2, imbalance_degree="medium",
                  root=HardCodedHierarchy().create_hardcoded_hierarchy(),
                  noise=0,
                  low_high_split=(0.3, 0.7),
@@ -78,7 +78,7 @@ class ImbalanceGenerator:
         :param total_n_classes: number of classes for the whole dataset
         :param features_remove_percent: number of features to remove/ actually this means to have this number of percent
         as missing features in the whole dataset. Currently, this will be +5/6 percent.
-        :param imbalance_degree: The degree of imbalance. Should be either 'normal', 'low' or 'high'. Here, normal means
+        :param imbalance_degree: The degree of imbalance. Should be either 'medium', 'low' or 'high'. Here, medium means
         to actually use the same (hardcoded) hierarchy that is passed via the root parameter.
         'low' means to have a more imbalanced dataset and 'high' means to have an even more imbalanced dataset.
         :param root: Root node of a hierarchy. This should be a root node that represent an anytree and stands for the hierarchy.
@@ -132,8 +132,8 @@ class ImbalanceGenerator:
         if self.imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {self.imbalance_degree}")
-            self.logger.warning(f"Setting imbalance_degree to default 'normal'")
-            self.imbalance_degree = "normal"
+            self.logger.warning(f"Setting imbalance_degree to default 'medium'")
+            self.imbalance_degree = "medium"
 
         # np.random.seed(1)
 
@@ -181,11 +181,11 @@ class ImbalanceGenerator:
             n_samples = group.n_samples
             occurences = group.class_occurences
             # special condition with n_samples < 15 to cover cases where n_classes=9 and n_samples=12
-            if imbalance_degree == 'normal' and n_samples > 15:
+            if imbalance_degree == 'medium' and n_samples > 15:
                 # do nothing in this case
                 pass
 
-            elif imbalance_degree == 'high' or imbalance_degree == 'very_high':
+            elif imbalance_degree == 'imbalanced' or imbalance_degree == 'very_imbalanced':
 
                 # get max occurence and the index for it
                 max_occurence = max(occurences)
@@ -207,14 +207,14 @@ class ImbalanceGenerator:
                         new_occurences[max_index] += occ - median_or_average
                         new_occurences[i] = median_or_average
 
-                    if imbalance_degree == 'high':
+                    if imbalance_degree == 'imbalanced':
                         break
                 occurences = new_occurences
 
-            elif imbalance_degree == 'low' or imbalance_degree == 'very_low':
+            elif imbalance_degree == 'balanced' or imbalance_degree == 'very_balanced':
                 original_average = sum(occurences) / len(occurences)
                 n_max_classes = 1
-                if imbalance_degree == 'very_low':
+                if imbalance_degree == 'very_balanced':
                     # number of classes that are above average
                     n_max_classes = len([x for x in occurences if x > original_average])
 
@@ -512,15 +512,15 @@ class ImbalanceGenerator:
 
     @staticmethod
     def _get_distribution_parameter(imbalance_degree):
-        if imbalance_degree == "very_low":
+        if imbalance_degree == "very_balanced":
             return 0.1
-        elif imbalance_degree == "low":
+        elif imbalance_degree == "balanced":
             return 1
-        elif imbalance_degree == "normal":
+        elif imbalance_degree == "medium":
             return 1.5
-        elif imbalance_degree == "high":
+        elif imbalance_degree == "imbalanced":
             return 3
-        elif imbalance_degree == "very_high":
+        elif imbalance_degree == "very_imbalanced":
             return 10
 
     def _get_leaf_nodes(self):
@@ -546,12 +546,12 @@ class ImbalanceGenerator:
             n_children = len(node.children)
             min_samples_per_node = [2 for i in range(n_children)]
             remaining_samples = node.n_samples - sum(min_samples_per_node)
-            samples_count = zipfian.rvs(a=1.5, size=remaining_samples, n=n_children)
+            samples_count = self.cls_prob_distribution(a=1.5, size=remaining_samples, n=n_children)
             samples_count = list(Counter(samples_count).values())
-            samples_count = [x+y for x,y in zip_longest(min_samples_per_node, samples_count, fillvalue=0)]
+            samples_count = [x + y for x, y in zip_longest(min_samples_per_node, samples_count, fillvalue=0)]
             samples_per_node = sorted(samples_count)
 
-            classes_count = zipfian.rvs(a=1, size=int(node.n_classes * 1.5), n=n_children)
+            classes_count = self.cls_prob_distribution(a=1, size=int(node.n_classes * 1.5), n=n_children)
             n_classes_per_node = list(Counter(classes_count).values())
 
             if len(n_classes_per_node) < n_children:
@@ -573,6 +573,10 @@ class ImbalanceGenerator:
             classes_start, classes_end = node.classes
             current_class_start = classes_start
 
+            n_classes_total = sum(n_classes_per_node)
+            class_range_max = classes_start + node.n_classes - 1
+            class_range_diff = n_classes_total - class_range_max
+
             ############### Assign classes, samples, features to child nodes #############
             for i, child in enumerate(node.children):
                 n_classes = n_classes_per_node[i]
@@ -589,18 +593,19 @@ class ImbalanceGenerator:
                 child.n_samples = n_samples
                 child.n_classes = n_classes
                 child.feature_set = features_per_child
-                current_nodes.append(child)
 
-                current_class_end = current_class_start + n_classes
+                current_class_end = current_class_start + n_classes -1
                 child.classes = (current_class_start, current_class_end)
-                current_class_start = current_class_start + n_classes
+                current_class_start = current_class_start + n_classes -1
 
-            if current_class_end > classes_end:
-                diff = current_class_end - classes_end
-                for child in node.children:
-                    child_cls_start, child_cls_end = child.classes
-                    if child_cls_start - diff > classes_start:
-                        child.classes = (child_cls_start - diff, child_cls_end - diff)
+                if current_class_end > classes_end:
+                    diff = current_class_end - classes_end
+                    for child in node.children:
+                        child_cls_start, child_cls_end = child.classes
+                        if child_cls_start - diff > classes_start:
+                            child.classes = (child_cls_start - diff, child_cls_end - diff)
+
+                current_nodes.append(child)
 
         ############################################################################
 
@@ -626,12 +631,7 @@ class ImbalanceGenerator:
         group_nodes = self._get_leaf_nodes()
         for node in group_nodes:
             n_samples = node.n_samples
-
-            #if n_samples < median_samples:
             class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
-            #else:
-                # Each class should occur at least twice
-             #   class_occurences = [max(2, 2 * int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
 
             remaining_samples = n_samples - sum(class_occurences)
 
@@ -652,7 +652,7 @@ class ImbalanceGenerator:
             distribution_parameter = self._get_distribution_parameter(self.imbalance_degree)
 
             if not split_minority_majority:
-                #class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
+                # class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
                 remaining_samples = n_samples - sum(class_occurences)
 
                 print(class_occurences)
@@ -666,6 +666,7 @@ class ImbalanceGenerator:
                 drawn_class_occurences = list(Counter(drawn_class_occurences).values())
                 for i, d_cls_occ in enumerate(drawn_class_occurences):
                     class_occurences[i] += d_cls_occ
+
             else:
                 # Generate occurences of minority and majority classes based on the defined distribution
                 majority_classes_occurrences = self.cls_prob_distribution(distribution_parameter, n_majority_classes,
@@ -685,7 +686,7 @@ class ImbalanceGenerator:
                 for j in range(0, len(minority_classes_occurences)):
                     class_occurences[len(majority_classes_occurrences) + j] += minority_classes_occurences[j]
 
-                if self.imbalance_degree == "very_high":
+                if self.imbalance_degree == "very_imbalanced":
                     min_occurence = np.min(class_occurences)
                     second_max, max_index = np.argpartition(class_occurences, -2)[-2:]
                     print(class_occurences)
@@ -693,7 +694,7 @@ class ImbalanceGenerator:
                         class_occurences[max_index] += class_occurences[second_max] - min_occurence
                         class_occurences[second_max] = min_occurence
 
-                elif self.imbalance_degree == "very_low":
+                elif self.imbalance_degree == "very_balanced":
                     original_average = int(sum(class_occurences) / len(class_occurences))
                     # number of classes that are above average
                     n_max_classes = len([x for x in class_occurences if x > original_average])
@@ -743,88 +744,10 @@ def discrete_gauss(a, n, size, random_state):
     """
     import scipy.special as sps
     f = np.array([sps.comb(n - 1, i, exact=True) for i in range(n)], dtype='O')
-    f = np.float64(f)/np.float64(f).sum()
+    f = np.float64(f) / np.float64(f).sum()
 
     if not np.allclose(f.sum(), 1.0):
-        raise ValueError("The distribution sum is not close to 1.\n" 
+        raise ValueError("The distribution sum is not close to 1.\n"
                          "f.sum(): %s" % f.sum())
     f = np.random.choice(n, size, p=f)
     return f
-
-
-if __name__ == '__main__':
-    np.random.seed(0)
-    random.seed(10)
-    result_for_imb = {}
-
-    for imb in ImbalanceGenerator.imbalance_degrees:
-        if imb != "normal":
-            continue
-        generator = ImbalanceGenerator(root=None, # describes the used taxonomy using an anytree instance
-                                       n_samples_total=1000,
-                                       imbalance_degree=imb,
-                                       low_high_split=(0.3, 0.7),
-                                       random_state=1234,
-                                       distribution=zipfian.rvs
-                                       )
-        df = generator.generate_data_with_product_hierarchy(
-            # distribution=boltzmann.rvs
-        )
-        print(RenderTree(generator.root))
-        exit()
-        print(len(df))
-
-        from imblearn.over_sampling import SMOTE
-        from imblearn.ensemble import BalancedRandomForestClassifier
-
-        X = df[[f"F{i}" for i in range(100)]].to_numpy()
-        y = df["target"]
-
-
-        def gini(x):
-            my_index = cm.Index()
-            class_frequencies = np.array(list(Counter(x).values()))
-            return my_index.gini(class_frequencies)
-
-
-        print(sorted(list(Counter(y).values())))
-        print(np.unique(y))
-        print(f"Gini Index is: {gini(df['target'])}")
-        try:
-            X_train, X_test, y_train, y_true = train_test_split(X, y, train_size=750 / 1050,
-                                                                stratify=y,
-                                                                random_state=1234)
-        except ValueError:
-            X_train, X_test, y_train, y_true = train_test_split(X, y, train_size=750 / 1050,
-                                                                random_state=1234)
-        X_train = KNNImputer().fit_transform(X_train)
-
-        #X_train, y_train = SMOTE(k_neighbors=5).fit_resample(X_train, y_train)
-        rf = RandomForestClassifier(random_state=1234)
-        rf.fit(X_train, y_train)
-        X_test = KNNImputer().fit_transform(X_test)
-        y_pred = rf.predict(X_test)
-        # y_true = y_test
-        print(f"Accuracy score is: {accuracy_score(y_pred, y_true)}")
-        result_for_imb[imb] = (gini(df['target']), accuracy_score(y_pred, y_true), generator.root)
-        print(f"micro: {f1_score(y_true, y_pred, average='micro')}")
-        print(f"macro: {f1_score(y_true, y_pred, average='macro')}")
-        print(f"weighted: {f1_score(y_true, y_pred, average='weighted')}")
-        print(f"balanced-accuracy: {balanced_accuracy_score(y_true, y_pred)}")
-        # print(f"prec_rec_fscore_support: {precision_recall_fscore_support(y_true, y_pred)}")
-
-        #print(classification_report(y_true, y_pred, digits=3, zero_division=1))
-
-        print(Counter(y))
-
-        # root, df_test= make_unbalance_hierarchy(df_test=df_test, level_cutoff=2, root_node=generator.root,
-        #                                        n_nodes_to_cutoff=2)
-        # print(RenderTree(root))
-
-    for k, v in result_for_imb.items():
-        print("-------------------------")
-        print(f"Imbalance Degree: {k}")
-        print(RenderTree(v[2]))
-        print(f"Gini: {v[0]}")
-        print(f"Accuracy RF: {v[1]}")
-        print("-------------------------")

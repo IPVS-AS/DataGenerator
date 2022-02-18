@@ -957,11 +957,6 @@ if __name__ == '__main__':
     rf_classifier = RandomForestClassMethod()
     rf_classifier.fit(df_train[[f"F{i}" for i in range(100)]], df_train["target"])
     rf_classifier.predict_test_samples(df_test)
-    print(rf_classifier.get_accuracy_per_e_df())
-    print(rf_classifier.get_stats_df())
-    print(gini(df["target"]))
-
-    exit()
 
     gini_thresholds = [
         0.3,
@@ -989,10 +984,10 @@ if __name__ == '__main__':
         # BirchClassification,
         # GMMClassification,
         SPH,
-        # SPHandCPI,
-        # RandomForestClassMethod,
-        # RandomForestBorutaMethod,
-        # CPI,
+         SPHandCPI,
+         RandomForestClassMethod,
+         RandomForestBorutaMethod,
+         CPI,
     ]
 
     np.random.seed(10)
@@ -1000,12 +995,12 @@ if __name__ == '__main__':
 
     output_directoy = "clustering/"
     imb_degrees = ImbalanceGenerator.imbalance_degrees
-    imb_degrees = ["normal"]
+    #imb_degrees = ["normal"]
 
     n_samples = 1050
     n_train_samples = 750
-    n_features = 20
-    missing = 0.5
+    n_features = 100
+    missing = 0.2
 
     for imbalance_degree in imb_degrees:
         n_train_samples = n_samples * (750 / 1050)
@@ -1028,12 +1023,12 @@ if __name__ == '__main__':
         root_node = generator.root
 
         methods_to_parameters = {
-            RFperGroup.name(): {"hierarchy": [root_node]},
+            #RFperGroup.name(): {"hierarchy": [root_node]},
             RandomForestClassMethod.name(): {"classifier_params": [random_forest_parameters]},
             RandomForestBorutaMethod.name(): {"classifier_params": [random_forest_parameters]},
-            KMeansClassification.name(): {"n_clusters": n_clusters_values},
-            GMMClassification.name(): {"n_components": n_clusters_values},
-            BirchClassification.name(): {"n_clusters": n_clusters_values},
+            #KMeansClassification.name(): {"n_clusters": n_clusters_values},
+            #GMMClassification.name(): {"n_components": n_clusters_values},
+            #BirchClassification.name(): {"n_clusters": n_clusters_values},
             SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
             SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
                                "gini_threshold": gini_thresholds, "p_threshold": p_quantile},
