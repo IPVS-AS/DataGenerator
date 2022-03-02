@@ -33,9 +33,15 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
     counter = Counter(df["target"].to_numpy())
     counter_one = {t: counter[t] for t in counter.keys() if counter[t] == 1}
     print(f"number of classes that have only one sample: {counter_one}")
-    # split with stratify such that each class occurs in train and test set
-    train, test = train_test_split(df, train_size=train_percent, random_state=1234,
+    try:
+        # split with stratify such that each class occurs in train and test set
+        train, test = train_test_split(df, train_size=train_percent, random_state=1234,
                                    stratify=df["target"]
+                                   )
+    except ValueError:
+        # If that does not work, split with normal procedure
+        train, test = train_test_split(df, train_size=train_percent, random_state=1234,
+                                   #stratify=df["target"]
                                    )
     n_not_in_train = 1
 
@@ -62,13 +68,6 @@ def train_test_splitting(df, n_train_samples=750, at_least_two_samples=True):
         if n_not_in_train > 0:
             # if yes, replace these samples with random samples from training set
             print(f"Classes that occur once in test but not in training data: {n_not_in_train}")
-            """
-            Todo: If we want to get more frequent classes  
-            probability = [x['freq'] for i,x in train.iterrows()]
-            print(probability)
-            sum_prob = sum(probability)
-            probability = [p/sum_prob for p in probability]
-            """
             drop_indices = np.random.choice(train.index, n_not_in_train,
                                             # p=probability
                                             )

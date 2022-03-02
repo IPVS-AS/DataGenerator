@@ -150,6 +150,7 @@ class ImbalanceGenerator:
         else:
             self._get_hardcoded_hierarchy_spec()
             self.hardcoded = True
+
             # remove features, don't need this for "generated" hierarchy as we define the features there!
             group_nodes_to_create = self._remove_features_from_spec()
         # check if all features are in the whole data, i.e., we have n_features
@@ -372,8 +373,9 @@ class ImbalanceGenerator:
                 current_class_num += created_classes
                 y = [assign_class(y_, self.total_n_classes) for y_ in y]
 
+
             # randomly set 5% of the values to nan
-            X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
+            #X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
 
             # we want to assign the data in the hierarchy such that the missing features get already none values
             # this will make it easier for SPH and CPI
@@ -561,13 +563,17 @@ class ImbalanceGenerator:
 
             ### Features per child node ##################################
             n_levels = self.root.height
+
             features_to_remove_per_level = self._eq_div(int(self.features_remove_percent * len(self.root.feature_set)),
                                                         n_levels)
             parent_features = node.feature_set
-            features_to_remove_per_child = [
-                random.sample(parent_features, features_to_remove_per_level[child.depth - 1])
-                for child in node.children]
-            features_per_child = [f for f in parent_features if f not in features_to_remove_per_child]
+            if self.features_remove_percent > 0:
+                features_to_remove_per_child = [
+                    random.sample(parent_features, features_to_remove_per_level[child.depth - 1])
+                    for child in node.children]
+                features_per_child = [f for f in parent_features if f not in features_to_remove_per_child]
+            else:
+                features_per_child = parent_features
 
             # marks start and end range for classes
             classes_start, classes_end = node.classes
