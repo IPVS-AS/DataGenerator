@@ -72,9 +72,9 @@ def run_machine_learning(gini_thresholds: list, p_quantile: list, max_info_loss_
                         root_node = HardCodedHierarchy().create_hardcoded_hierarchy()
 
                         generator = ImbalanceGenerator(root=root_node,
-                                                       imbalance_degree=imbalance_degree,
+                                                       cls_imbalance=imbalance_degree,
                                                        n_features=n_features,
-                                                       n_samples_total=n_samples,
+                                                       n=n_samples,
                                                        features_remove_percent=features_remove_percent)
                         data_df = generator.generate_data_with_product_hierarchy()
                         root_node = generator.root

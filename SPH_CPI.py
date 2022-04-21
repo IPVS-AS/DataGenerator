@@ -1,11 +1,9 @@
 import logging
-import os
-import random
 import warnings
 from abc import abstractmethod
 from collections import Counter
-from itertools import product
 
+import hdbscan
 from anytree import PreOrderIter, RenderTree
 from boruta import BorutaPy
 from sklearn.cluster import KMeans, Birch
@@ -855,7 +853,12 @@ class ClusteringClassification(ClassificationMethod):
         X_train_zero = np.nan_to_num(X_train, nan=nan_replacement)
         cluster_model = self.clustering_algorithm(**self.clustering_parameters) \
             .fit(X_train_zero)
-        labels = cluster_model.predict(X_train_zero)
+        try:
+            labels = cluster_model.predict(X_train_zero)
+        except AttributeError as e:
+            print(e)
+            labels = np.array(cluster_model.labels_)
+
         self.cluster_model = cluster_model
 
         for cluster_id in np.unique(labels):
@@ -884,9 +887,14 @@ class ClusteringClassification(ClassificationMethod):
         df_test_numeric = df_test.select_dtypes(include=np.float)
         X_test = df_test_numeric[[f"F{i}" for i in range(df_test_numeric.shape[1])]].to_numpy()
         X_test = np.nan_to_num(X_test, nan=nan_replacement)
-        df_test["cluster_id"] = self.cluster_model.predict(X_test)
+        try:
+            df_test["cluster_id"] = self.cluster_model.predict(X_test)
+        except AttributeError as e:
+            print(e)
+            df_test["cluster_id"] = hdbscan.approximate_predict(self.cluster_model, X_test)[0]
 
         for cluster_id in df_test["cluster_id"].unique():
+            print(cluster_id)
             cluster_test_samples = df_test[df_test["cluster_id"] == cluster_id]
             clf_model = self.model_repository[cluster_id]
 
@@ -924,6 +932,18 @@ class GMMClassification(ClusteringClassification):
     def name():
         return "GMM"
 
+class HDBSCANClassification(ClusteringClassification):
+    # TODO: NOT WORKING?!
+
+    def __init__(self, run_id=1):
+        super(HDBSCANClassification, self).__init__(clustering_algorithm="HDBSCAN",
+                                                clustering_parameters={"prediction_data": True},
+                                                run_id=run_id)
+
+    @staticmethod
+    def name():
+        return "GMM"
+
 
 class BirchClassification(ClusteringClassification):
     def __init__(self, n_clusters, run_id=1):
@@ -939,139 +959,32 @@ class BirchClassification(ClusteringClassification):
 CLUSTERING_MAP = {
     "KMeans": KMeans,
     "GMM": GaussianMixture,
-    "Birch": Birch
+    "Birch": Birch,
+    "HDBSCAN": hdbscan.HDBSCAN
 }
 
 if __name__ == '__main__':
-    generator = ImbalanceGenerator(root=None, low_high_split=(0.3, 0.7))
+    f = 100
+    generator = ImbalanceGenerator(root=HardCodedHierarchy().create_hardcoded_hierarchy(), n=10000,
+                                   n_features=f,
+                                   c=100,
+                                   features_remove_percent=0)
     df = generator.generate_data_with_product_hierarchy()
     print(RenderTree(generator.root))
     print(len(df))
     print(gini(df["target"]))
 
-    df_train, df_test = train_test_split(df, train_size=0.7, stratify=df["group"])
+    df_train, df_test = train_test_split(df, train_size=0.7,
+                                         stratify=df[["target", "group"]]
+                                         )
     # root, df_test= make_unbalance_hierarchy(df_test=df_test, level_cutoff=2, root_node=generator.root,
     #                                        n_nodes_to_cutoff=2)
     # print(RenderTree(root))
+    #update_data_and_training_data(generator.root, df_train=df_train)
+    classif = RandomForestClassMethod()
+    X_train = df_train[[f"F{i}" for i in range(f)]]
+    y_train = df_train["target"].to_numpy()
 
-    rf_classifier = RandomForestClassMethod()
-    rf_classifier.fit(df_train[[f"F{i}" for i in range(100)]], df_train["target"])
-    rf_classifier.predict_test_samples(df_test)
-
-    gini_thresholds = [
-        0.3,
-        0.35,
-        0.4
-    ]
-
-    p_quantile = [
-        0.7,
-        0.75,
-        0.8,
-        0.85,
-        0.9
-    ]
-
-    max_info_loss_values = [
-        0.25, 0.3, 0.35,
-        0.4]
-
-    n_clusters_values = [10, 15, 20, 25, 26, 30, 35, 40, 45, 50]
-
-    METHODS = [
-        # RFperGroup,
-        # KMeansClassification,
-        # BirchClassification,
-        # GMMClassification,
-        SPH,
-         SPHandCPI,
-         RandomForestClassMethod,
-         RandomForestBorutaMethod,
-         CPI,
-    ]
-
-    np.random.seed(10)
-    random.seed(10)
-
-    output_directoy = "clustering/"
-    imb_degrees = ImbalanceGenerator.imbalance_degrees
-    #imb_degrees = ["normal"]
-
-    n_samples = 1050
-    n_train_samples = 750
-    n_features = 100
-    missing = 0.2
-
-    for imbalance_degree in imb_degrees:
-        n_train_samples = n_samples * (750 / 1050)
-
-        generator = ImbalanceGenerator(imbalance_degree=imbalance_degree,
-                                       root=FlatHierarchy().create_hierarchy(),
-                                       n_samples_total=n_samples, n_features=n_features,
-                                       features_remove_percent=missing)
-        data_df = generator.generate_data_with_product_hierarchy()
-        n_classes = len(data_df["target"].unique())
-        n_samples = len(data_df)
-        n_features_generated = data_df.shape[1]
-        missing = data_df.isna().sum().sum() / (data_df.shape[0] * data_df.shape[1])
-        print(f"n classes: {n_classes}")
-        print(f"n samples: {n_samples}")
-        print(f"n features: {n_features_generated}")
-        print(f"missing: {missing}")
-        print(f"gini: {gini(data_df['target'].to_numpy())}")
-
-        root_node = generator.root
-
-        methods_to_parameters = {
-            #RFperGroup.name(): {"hierarchy": [root_node]},
-            RandomForestClassMethod.name(): {"classifier_params": [random_forest_parameters]},
-            RandomForestBorutaMethod.name(): {"classifier_params": [random_forest_parameters]},
-            #KMeansClassification.name(): {"n_clusters": n_clusters_values},
-            #GMMClassification.name(): {"n_components": n_clusters_values},
-            #BirchClassification.name(): {"n_clusters": n_clusters_values},
-            SPH.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node]},
-            SPHandCPI.name(): {"max_info_loss": max_info_loss_values, "hierarchy": [root_node],
-                               "gini_threshold": gini_thresholds, "p_threshold": p_quantile},
-            CPI.name(): {"gini_threshold": gini_thresholds, "p_threshold": p_quantile},
-        }
-
-        # Train/Test split and update data in the hierarchy
-        df_train, df_test = train_test_splitting(data_df, n_train_samples=n_train_samples)
-        update_data_and_training_data(root_node=root_node, df_train=df_train, data_df=data_df, n_features=n_features)
-
-        print(len(df_train))
-        print(len(df_test))
-
-        X_train, X_test, y_train, y_test = get_train_test_X_y(df_train, df_test, n_features=n_features)
-
-        rf_instance = RandomForestClassMethod()
-        rf_instance.fit(X_train, y_train)
-        rf_instance.predict_test_samples(df_test)
-        clustering_df = rf_instance.get_accuracy_per_e_df()
-        print(clustering_df)
-        stats_df = rf_instance.get_stats_df()
-        predictions_df = rf_instance.get_predictions_df()
-
-        for method in METHODS:
-            parameter_dicts = methods_to_parameters[method.name()]
-            for parameter_vals in product(*parameter_dicts.values()):
-                print(list(product(*parameter_dicts.values())))
-                print(dict(zip(parameter_dicts, parameter_vals)))
-                method_instance = method(**dict(zip(parameter_dicts, parameter_vals)))
-                method_instance.fit(X_train, y_train)
-                method_instance.predict_test_samples(df_test)
-                accuracy_df = method_instance.get_accuracy_per_e_df()
-                print(accuracy_df)
-
-                method_instance.track_stats()
-                stats = method_instance.get_stats_df()
-
-                clustering_df = pd.concat([clustering_df, accuracy_df], ignore_index=True)
-                stats_df = pd.concat([stats_df, stats])
-
-                predictions = method_instance.get_predictions_df()
-                predictions_df = pd.concat([predictions_df, predictions])
-
-            clustering_df.to_csv(output_directoy + f"{imbalance_degree}/acc.csv")
-            stats_df.to_csv(output_directoy + f"{imbalance_degree}/stats.csv")
-            predictions_df.to_csv(output_directoy + f"{imbalance_degree}/preds.csv")
+    classif.fit(X_train, y_train)
+    classif.predict_test_samples(df_test)
+    print(classif.get_accuracy_per_e_df())

@@ -5,7 +5,7 @@ from anytree import RenderTree
 
 from Hierarchy import HardCodedHierarchy
 from SPH_CPI import RandomForestClassMethod, KMeansClassification, \
-    BirchClassification
+    BirchClassification, SPHandCPI
 from DataGenerator import ImbalanceGenerator
 from Utility import train_test_splitting, get_train_test_X_y
 
@@ -22,10 +22,10 @@ n_samples = 1000
 n_classes = 84
 
 # First of all, we instantiate an imbalance generator. We leave the parameters as "default" parameters.
-generator = ImbalanceGenerator(n_features=n_features, n_samples_total=n_samples, imbalance_degree="medium",
+generator = ImbalanceGenerator(n_features=n_features, n=n_samples, cls_imbalance="medium",
                                root=HardCodedHierarchy().create_hardcoded_hierarchy(),
                                # root=None, (Could also be none for an automatic hierarchy generation)
-                               total_n_classes=n_classes, features_remove_percent=0)
+                               c=n_classes, features_remove_percent=0)
 
 # Then we generate the data. The result is a dataframe. The actual features of the dataset are contained in the columns
 # F0, F1, ..., F{n_features - 1}
@@ -44,9 +44,11 @@ df_train, df_test = train_test_splitting(df, n_train_samples=int(0.75*n_samples)
 # Transform to X_train, X_test and y_train, y_test
 X_train, X_test, y_train, y_test = get_train_test_X_y(df_train=df_train, df_test=df_test, n_features=n_features)
 
+from Utility import update_data_and_training_data
+root = update_data_and_training_data(hierarchy_root, df_train=df_train)
 # Now we train our model by running clustering and then train a Random Forest on each cluster.
 n_clusters = 20
-classif_method = KMeansClassification(n_clusters=n_clusters)
+classif_method = SPHandCPI(root)
 
 # There are at the moment 3 different clustering methods that can be used in the same way.
 # However, yet this is only possible because they have the same parameter "k".
@@ -80,5 +82,12 @@ print("Predictions:")
 print(predictions_df)
 print("-------------------------------------")
 
+rf = RandomForestClassMethod()
+rf.fit(X_train, y_train)
+print("--------------------------------------------")
+print("Baseline:")
+rf.predict_test_samples(df_test)
+print(rf.get_accuracy_per_e_df())
+print("--------------------------------------------")
 
 # For further usage of running multiple methods, you can also have a look at the Experiment.py file.

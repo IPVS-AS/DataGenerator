@@ -247,6 +247,94 @@ class HardCodedHierarchy:
         return "hardcoded-hierarchy"
 
 
+class EngineTaxonomy:
+    """
+    Represents a 'hardcoded' hierarchy that is very close to the Hierarchy from the hirsch et al. paper.
+    We define exactly how many samples, classes, features and even how often each class occurs.
+    """
+
+    def __init__(self):
+        pass
+
+    def create_taxonomy(self):
+        # level 0
+        root = Node(node_id="Engine")
+
+        # level 1
+        DE = Node(node_id="Diesel", parent=root)
+        # ## all classes for level 2 and 3 that belong to DE have to have the classes in the same range as DE, i.e.,
+        # (1, 60)
+
+        # level 2
+        om1 = Node(node_id="DE-OM1", parent=DE)
+
+        # level 3
+        # n_samples=1 are removed --> we add them to another class
+        # om1_1 = Node(node_id="DE-OM1-1", n_samples=1, parent=om1, feature_set=None)
+        om1_2 = Node(node_id="DE-OM1-2", parent=om1)
+        om1_3 = Node(node_id="DE-OM1-3", parent=om1)
+        om1_4 = Node(node_id="DE-OM1-4", parent=om1)
+        #om1_5 = Node(node_id="DE-OM1-5", parent=om1)
+        #om1_6 = Node(node_id="DE-OM1-6", parent=om1)
+        # om1_7= Node(node_id="DE-OM1-7", n_samples=4, parent=om1, feature_set=None, n_classes=2, classes=(29, 30),
+        #             class_occurences=[3, 1])
+
+        # level 2
+        om2 = Node(node_id="DE-OM2", parent=DE)
+
+        # level 3
+        om2_1 = Node(node_id="DE-OM2-1", parent=om2)
+        om2_2 = Node(node_id="DE-OM2-2", parent=om2)
+        om2_3 = Node(node_id="DE-OM2-3", parent=om2)
+        # om2_4 = Node(node_id="DE-OM2-4", n_samples=1, parent=om2, feature_set=None)
+        om2_5 = Node(node_id="DE-OM2-5", parent=om2)
+        om2_6 = Node(node_id="DE-OM2-6", parent=om2)
+
+        # level 2
+        om3 = Node(node_id="DE-OM3",parent=DE)
+        # level 3
+        om3_1 = Node(node_id="DE-OM3-1", parent=om3)
+        # om3_2 = Node(node_id="DE-OM3-2", n_samples=1, parent=om3, feature_set=None)
+        om3_3 = Node(node_id="DE-OM3-3", parent=om3)
+
+        # level 1
+        GE = Node(node_id="Gasoline", parent=root)
+
+        # level 2
+        # Info: Freq(A) = 51, b: 13, C: 13, D:9
+        # --> The rest are 39 classes that occur around 2 or 3 times
+        GE_om1 = Node(node_id="GE-OM1", parent=GE)
+        # level 3
+        # GE_om1_1 = Node(node_id="GE-OM1-1", n_samples=1, parent=GE_om1, feature_set=None)
+        GE_om1_2 = Node(node_id="GE-OM1-2", parent=GE_om1)
+        GE_om1_3 = Node(node_id="GE-OM1-3", parent=GE_om1)
+        GE_om1_4 = Node(node_id="GE-OM1-4", parent=GE_om1)
+
+        GE_om1_5 = Node(node_id="GE-OM1-5", parent=GE_om1)
+        GE_om1_6 = Node(node_id="GE-OM1-6", parent=GE_om1)
+        GE_om1_7 = Node(node_id="GE-OM1-7", parent=GE_om1)
+
+        # level 2
+        GE_om3 = Node(node_id="GE-OM3", parent=GE)
+        # level 3
+        GE_om3_1 = Node(node_id="GE-OM3-1", parent=GE_om3)
+        # GE_om3_2 = Node(node_id="GE-OM3-2", n_samples=1, parent=GE_om3, feature_set=None)
+        # GE_om3_3 = Node(node_id="GE-OM3-3", n_samples=1, parent=GE_om3, feature_set=None)
+        GE_om3_4 = Node(node_id="GE-OM3-4", parent=GE_om3)
+        #GE_om3_5 = Node(node_id="GE-OM3-5", parent=GE_om3)
+        GE_om3_6 = Node(node_id="GE-OM3-6", parent=GE_om3)
+        GE_om3_7 = Node(node_id="GE-OM3-7", parent=GE_om3)
+        GE_om3_8 = Node(node_id="GE-OM3-8", parent=GE_om3)
+        GE_om3_9 = Node(node_id="GE-OM3-9",parent=GE_om3)
+        GE_om3_10 = Node(node_id="GE-OM3-10",parent=GE_om3)
+        GE_om3_11 = Node(node_id="GE-OM3-11", parent=GE_om3)
+        GE_om3_12 = Node(node_id="GE-OM3-12", parent=GE_om3)
+        #GE_om3_13 = Node(node_id="GE-OM3-13",parent=GE_om3)
+        return root
+
+    def name(self):
+        return "engine-taxonomy"
+
 
 class FlatHierarchy:
     """
@@ -316,6 +404,7 @@ def make_unbalance_hierarchy(root_node, level_cutoff, df_test, n_nodes_to_cutoff
         lambda x: assign_group_name(x, cutoff_node_ids, level_cutoff), axis=1)
     return root_node, df_test
 
+"""
 root = HardCodedHierarchy().create_hardcoded_hierarchy()
 nodes = [root]
 # test that classes and n_classes is the same in each node
@@ -329,7 +418,6 @@ while True:
     if len(nodes) == 0:
         break
 
-"""
 product_group_nodes = [node for node in PreOrderIter(root) if not node.children]
 for node in product_group_nodes:
     print(f"current node: {node.node_id}")

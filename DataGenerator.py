@@ -9,18 +9,13 @@ import imblearn
 from anytree import RenderTree, PreOrderIter
 from scipy.stats import boltzmann, zipfian, dlaplace, poisson, zipf
 from skclean.simulate_noise import flip_labels_uniform
+from sklearn import svm
 from sklearn.datasets import make_classification, make_blobs
 from itertools import zip_longest
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.impute import KNNImputer
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, classification_report, balanced_accuracy_score, \
-    precision_recall_fscore_support
-from sklearn.model_selection import train_test_split
-
-from Hierarchy import Node, HardCodedHierarchy, FlatHierarchy, make_unbalance_hierarchy
+from Hierarchy import Node, HardCodedHierarchy, EngineTaxonomy
 import concentrationMetrics as cm
 
 
@@ -64,42 +59,52 @@ class ImbalanceGenerator:
         POISSON: poisson.rvs,
     }
 
-    def __init__(self, n_features=100, n_samples_total=1050, n_levels=4, total_n_classes=84,
-                 features_remove_percent=0.2, imbalance_degree="medium",
+    def __init__(self, n_features=100, n=1050,
+                 n_levels=4,
+                 c=84,
+                 features_remove_percent=0,
+                 gs=1,
+                 n_group_features=1,
+                 cls_imbalance="medium",
+                 group_imbalance="medium",
                  root=HardCodedHierarchy().create_hardcoded_hierarchy(),
                  noise=0,
-                 low_high_split=(0.3, 0.7),
                  distribution=zipfian.rvs,
+                 class_overlap=1.5,
+                 hardcoded=False,
                  random_state=1234):
         """
         :param n_features: number of features to use for the overall generated dataset
-        :param n_samples_total: number of samples that should be generated in the whole dataset
+        :param n: number of samples that should be generated in the whole dataset
         :param n_levels: number of levels of the hierarchy. Does not need to be specified if a hierarchy is already given!
-        :param total_n_classes: number of classes for the whole dataset
+        :param c: number of classes for the whole dataset
         :param features_remove_percent: number of features to remove/ actually this means to have this number of percent
         as missing features in the whole dataset. Currently, this will be +5/6 percent.
-        :param imbalance_degree: The degree of imbalance. Should be either 'medium', 'low' or 'high'. Here, medium means
+        :param cls_imbalance: The degree of imbalance. Should be either 'medium', 'low' or 'high'. Here, medium means
         to actually use the same (hardcoded) hierarchy that is passed via the root parameter.
         'low' means to have a more imbalanced dataset and 'high' means to have an even more imbalanced dataset.
         :param root: Root node of a hierarchy. This should be a root node that represent an anytree and stands for the hierarchy.
         :param distribution: Distribution to use. In the moment, either boltzman.rvs or zipfian.rvs are tested from the scipy.stats module!
         :param noise: Percentage of noise to generate (in [0,1])
-        :param low_high_split: split percentage for distribution of samples and classes to the nodes.
         :param random_state:
         """
-        self.imbalance_degree = imbalance_degree
-        self.hardcoded = None
+        self.cls_imbalance = cls_imbalance
+        self.group_imbalance = group_imbalance
+        self.hardcoded = hardcoded
         self.root = root
         self.n_features = n_features
         self.n_levels = n_levels
-        self.features_remove_percent = features_remove_percent
-        self.noise = noise
-        self.low_split = low_high_split[0]
-        self.high_split = low_high_split[1]
-        self.cls_prob_distribution = distribution
-        self.n_samples_total = n_samples_total
-        self.total_n_classes = total_n_classes
+        self.prob_distribution = distribution
+        self.group_separation = gs
+        self.n_group_features = n_group_features
+
+        self.n_samples_total = n
+        self.total_n_classes = c
         self.random_state = random_state
+        self.class_overlap = class_overlap
+
+        self.noise = noise
+        self.features_remove_percent = features_remove_percent
 
         np.random.seed(self.random_state)
         random.seed(self.random_state)
@@ -129,30 +134,41 @@ class ImbalanceGenerator:
         The hierarchy is implicitly given through the specific attributes that represent the hierarchy.
         """
 
-        if self.imbalance_degree not in ImbalanceGenerator.imbalance_degrees:
-            self.logger.error(f"imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
-                              f" {self.imbalance_degree}")
-            self.logger.warning(f"Setting imbalance_degree to default 'medium'")
-            self.imbalance_degree = "medium"
+        if self.cls_imbalance not in ImbalanceGenerator.imbalance_degrees:
+            self.logger.error(f"cls_imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
+                              f" {self.cls_imbalance}")
+            self.logger.warning(f"Setting cls_imbalance_degree to default 'medium'")
+            self.cls_imbalance = "medium"
+        if self.group_imbalance not in ImbalanceGenerator.imbalance_degrees:
+            self.logger.error(f"group_imbalance should be one of {ImbalanceGenerator.imbalance_degrees} but got"
+                              f" {self.group_imbalance}")
+            self.logger.warning(f"Setting group_imbalance to default 'medium'")
+            self.group_imbalance = "medium"
 
         # np.random.seed(1)
 
-        if not self.root:
-            features = list(range(self.n_features))
-            self.root = Node(node_id="0", n_samples=self.n_samples_total, feature_set=features,
-                             n_classes=self.total_n_classes,
-                             classes=(0, self.total_n_classes))
-            # generate default hierarchy
-            n_nodes_per_level_per_parent = self._generate_default_hierarchy_spec()
+        features = list(range(self.n_features))
+        if self.hardcoded:
+            self._get_hardcoded_hierarchy_spec()
+
+        else:
+            if not self.root:
+                self.root = Node(node_id="0", n_samples=self.n_samples_total, feature_set=features,
+                                 n_classes=self.total_n_classes,
+                                 classes=(0, self.total_n_classes))
+                # generate default hierarchy
+                self._generate_default_hierarchy_spec()
+            else:
+                self.root.n_samples = self.n_samples_total
+                self.root.n_classes = self.total_n_classes
+                self.root.feature_set = features
+                self.root.classes = (0, self.total_n_classes)
             self._assign_samples_classes_features()
             self._generate_class_occurences()
-            self.hardcoded = False
-        else:
-            self._get_hardcoded_hierarchy_spec()
-            self.hardcoded = True
 
             # remove features, don't need this for "generated" hierarchy as we define the features there!
             group_nodes_to_create = self._remove_features_from_spec()
+
         # check if all features are in the whole data, i.e., we have n_features
         self._check_features()
 
@@ -178,7 +194,7 @@ class ImbalanceGenerator:
         groups = self._get_leaf_nodes()
 
         for group in groups:
-            imbalance_degree = self.imbalance_degree
+            imbalance_degree = self.cls_imbalance
             n_samples = group.n_samples
             occurences = group.class_occurences
             # special condition with n_samples < 15 to cover cases where n_classes=9 and n_samples=12
@@ -232,7 +248,6 @@ class ImbalanceGenerator:
                     median_or_average = int(average) if median == 1 else int(median)
 
                     # if len(new_occurences) < max_occurence:
-                    print(max_occurence - median_or_average)
                     new_occurences[max_index] = median_or_average
 
                     # equal division of max - average
@@ -316,11 +331,10 @@ class ImbalanceGenerator:
             else:
                 logging.error("No occurences specified!")
 
-            n_features_to_move = 1
             # take random feature(s) along we move the next group
-            feature_to_move = np.random.choice(feature_set, n_features_to_move)
+            feature_to_move = np.random.choice(feature_set, self.n_group_features)
             for feature in feature_to_move:
-                feature_limits[feature] += 1
+                feature_limits[feature] += self.group_separation
 
             # set number of informative features
             n_informative = n_features - 1
@@ -340,7 +354,7 @@ class ImbalanceGenerator:
                                        random_state=self.random_state,
                                        # higher value can cause less classes to be generated
                                        flip_y=0,
-                                       # class_sep=0.1,
+                                       # class_sep=10,
                                        hypercube=True,
                                        # shift=random.random(),
                                        # scale=random.random()
@@ -373,9 +387,8 @@ class ImbalanceGenerator:
                 current_class_num += created_classes
                 y = [assign_class(y_, self.total_n_classes) for y_ in y]
 
-
             # randomly set 5% of the values to nan
-            #X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
+            # X.ravel()[np.random.choice(X.size, int(0.05 * X.size), replace=False)] = np.NaN
 
             # we want to assign the data in the hierarchy such that the missing features get already none values
             # this will make it easier for SPH and CPI
@@ -418,7 +431,7 @@ class ImbalanceGenerator:
         return group_nodes
 
     def _check_features(self):
-        group_nodes_to_create = self._get_leaf_nodes()
+        group_nodes_to_create = list(self._get_leaf_nodes())
         current_used_feature_set = set([feature for group in group_nodes_to_create for feature in group.feature_set])
 
         # features that are currently not used by the groups
@@ -431,16 +444,8 @@ class ImbalanceGenerator:
                 # assign each feature to a group with weighted probability
                 # the less features the groups have, the higher is the probability that they get the feature
 
-                # assign probability that each group is chosen (1- (group_features/total_features))
-                probability_choose_group = list(map(lambda x: 1 - (len(x.feature_set) / len(self.root.feature_set)),
-                                                    group_nodes_to_create))
-                # normalize probabilities so that they sum up to 1
-                probability_normalized = [prob / sum(probability_choose_group) for prob in probability_choose_group]
-
-                print(
-                    f"probability distribution of the groups for feature {not_used_feature} is: {probability_normalized}")
                 # choose random index with the given probabilities
-                group_index = np.random.choice(len(group_nodes_to_create), 1, p=probability_normalized)
+                group_index = np.random.choice(len(group_nodes_to_create), 1)
                 assert len(group_index) == 1
                 # convert list with "one" element to int
                 group_index = group_index[0]
@@ -496,7 +501,6 @@ class ImbalanceGenerator:
 
                 # assert sum of childs are equal to parent node n_samples
                 childs_n_samples_sum = sum(map(lambda x: x.n_samples, childs))
-                print(parent_node)
                 assert parent_node.n_samples == childs_n_samples_sum
                 parent_features = parent_node.feature_set
 
@@ -511,19 +515,6 @@ class ImbalanceGenerator:
 
         # parent nodes are now the group nodes
         return parent_nodes
-
-    @staticmethod
-    def _get_distribution_parameter(imbalance_degree):
-        if imbalance_degree == "very_balanced":
-            return 0.1
-        elif imbalance_degree == "balanced":
-            return 1
-        elif imbalance_degree == "medium":
-            return 1.5
-        elif imbalance_degree == "imbalanced":
-            return 3
-        elif imbalance_degree == "very_imbalanced":
-            return 10
 
     def _get_leaf_nodes(self):
         return anytree.search.findall(self.root, lambda x: x.is_leaf)
@@ -542,18 +533,21 @@ class ImbalanceGenerator:
         ######## Determine number of samples for each node ########
         while current_nodes:
             node = current_nodes.pop()
-            if not node.children:
+            n_children = len(node.children)
+            if n_children == 0:
                 continue
 
-            n_children = len(node.children)
-            min_samples_per_node = [2 for i in range(n_children)]
+            min_samples_per_node = [1 for i in range(n_children)]
             remaining_samples = node.n_samples - sum(min_samples_per_node)
-            samples_count = self.cls_prob_distribution(a=1.5, size=remaining_samples, n=n_children)
+            group_distribution = self._get_group_distribution_parameter(self.group_imbalance)
+
+            samples_count = self.prob_distribution(a=group_distribution, size=remaining_samples, n=n_children)
             samples_count = list(Counter(samples_count).values())
             samples_count = [x + y for x, y in zip_longest(min_samples_per_node, samples_count, fillvalue=0)]
             samples_per_node = sorted(samples_count)
 
-            classes_count = self.cls_prob_distribution(a=1, size=int(node.n_classes * 1.5), n=n_children)
+            classes_count = self.prob_distribution(a=group_distribution, size=int(node.n_classes * self.class_overlap),
+                                                   n=n_children)
             n_classes_per_node = list(Counter(classes_count).values())
 
             if len(n_classes_per_node) < n_children:
@@ -579,10 +573,6 @@ class ImbalanceGenerator:
             classes_start, classes_end = node.classes
             current_class_start = classes_start
 
-            n_classes_total = sum(n_classes_per_node)
-            class_range_max = classes_start + node.n_classes - 1
-            class_range_diff = n_classes_total - class_range_max
-
             ############### Assign classes, samples, features to child nodes #############
             for i, child in enumerate(node.children):
                 n_classes = n_classes_per_node[i]
@@ -600,125 +590,52 @@ class ImbalanceGenerator:
                 child.n_classes = n_classes
                 child.feature_set = features_per_child
 
-                current_class_end = current_class_start + n_classes -1
-                child.classes = (current_class_start, current_class_end)
-                current_class_start = current_class_start + n_classes -1
+                current_class_end = current_class_start + n_classes
 
-                if current_class_end > classes_end:
-                    diff = current_class_end - classes_end
-                    for child in node.children:
-                        child_cls_start, child_cls_end = child.classes
-                        if child_cls_start - diff > classes_start:
-                            child.classes = (child_cls_start - diff, child_cls_end - diff)
+                current_diff = (current_class_end - classes_end)
+                while current_class_end > classes_end and current_class_start - current_diff >= 0:
+                    current_diff = (current_class_end - classes_end)
+                    current_class_start -= (current_diff)
+                    current_class_end -= (current_diff)
+                child.classes = (current_class_start, current_class_end)
+                current_class_start = current_class_start + n_classes
 
                 current_nodes.append(child)
 
         ############################################################################
 
-    def _generate_class_occurences(self, split_minority_majority=False):
+    def _generate_class_occurences(self):
         """
         We assume we have set the number of samples, classes, features per node in the hierarchy, so we can now define
         how often each class should occur for each node, i.e., the actual class distribution!
         :return:
         """
 
-        # first, we need some statistics (percentiles) of the samples --> use this for class distribution
-        low_samples = np.percentile([node.n_samples for node in PreOrderIter(self.root) if not node.children], 25)
-        median_samples = np.percentile([node.n_samples for node in PreOrderIter(self.root) if not node.children], 50)
-        high_samples = np.percentile([node.n_samples for node in PreOrderIter(self.root) if not node.children], 75)
-        zero_percentile = np.percentile([node.n_samples for node in PreOrderIter(self.root) if not node.children], 0)
-
-        print(
-            f"5-percentile: {np.percentile([node.n_samples for node in PreOrderIter(self.root) if not node.children], 3)}")
-        print(f"25-percentile: {low_samples}")
-        print(f"50-percentile: {median_samples}")
-        print(f"75-percentile: {high_samples}")
-
         group_nodes = self._get_leaf_nodes()
         for node in group_nodes:
             n_samples = node.n_samples
-            class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
-
-            remaining_samples = n_samples - sum(class_occurences)
-
-            # we split into "minority" and "majority" classes --> We define high split majority classes and the rest
-            # as minority classes.
-            # However, it will (!) occur that at least one of the minority classes is then actually a majority class
-            n_majority_samples = math.ceil(self.high_split * remaining_samples)
-            n_minority_samples = math.floor(self.low_split * remaining_samples)
-            n_majority_classes = math.floor(node.n_classes * self.low_split)
-            n_minority_classes = math.ceil(node.n_classes * self.high_split)
-
-            if n_majority_classes == 0:
-                # Edge case if we do not have majority classes. Take at least one
-                n_majority_classes += 1
-                n_minority_classes -= 1
+            class_occurences = [max(2, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
 
             # get parameter for distribution, based on defined imbalance degree
-            distribution_parameter = self._get_distribution_parameter(self.imbalance_degree)
+            cls_distribution = self._get_distribution_parameter(self.cls_imbalance)
 
-            if not split_minority_majority:
-                # class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
-                remaining_samples = n_samples - sum(class_occurences)
+            # class_occurences = [max(1, int(self.n_samples_total / 1000)) for _ in range(node.n_classes)]
+            remaining_samples = n_samples - sum(class_occurences)
 
-                print(class_occurences)
-                print(remaining_samples)
-                print(node.n_samples)
-                drawn_class_occurences = self.cls_prob_distribution(distribution_parameter,
-                                                                    node.n_classes,
-                                                                    size=remaining_samples,
-                                                                    random_state=self.random_state)
-                print(drawn_class_occurences)
+            if remaining_samples > 0:
+                drawn_class_occurences = self.prob_distribution(cls_distribution,
+                                                                node.n_classes,
+                                                                size=remaining_samples,
+                                                                random_state=self.random_state)
                 drawn_class_occurences = list(Counter(drawn_class_occurences).values())
                 for i, d_cls_occ in enumerate(drawn_class_occurences):
                     class_occurences[i] += d_cls_occ
 
-            else:
-                # Generate occurences of minority and majority classes based on the defined distribution
-                majority_classes_occurrences = self.cls_prob_distribution(distribution_parameter, n_majority_classes,
-                                                                          size=n_majority_samples,
-                                                                          random_state=self.random_state)
-                minority_classes_occurences = self.cls_prob_distribution(distribution_parameter, n_minority_classes,
-                                                                         size=n_minority_samples,
-                                                                         random_state=self.random_state)
-
-                majority_classes_occurrences = list(Counter(majority_classes_occurrences).values())
-                minority_classes_occurences = list(Counter(minority_classes_occurences).values())
-
-                # assign class occurences of minority and majority classes
-                for i in range(0, len(majority_classes_occurrences)):
-                    class_occurences[i] += majority_classes_occurrences[i]
-
-                for j in range(0, len(minority_classes_occurences)):
-                    class_occurences[len(majority_classes_occurrences) + j] += minority_classes_occurences[j]
-
-                if self.imbalance_degree == "very_imbalanced":
-                    min_occurence = np.min(class_occurences)
-                    second_max, max_index = np.argpartition(class_occurences, -2)[-2:]
-                    print(class_occurences)
-                    if class_occurences[second_max] > min_occurence:
-                        class_occurences[max_index] += class_occurences[second_max] - min_occurence
-                        class_occurences[second_max] = min_occurence
-
-                elif self.imbalance_degree == "very_balanced":
-                    original_average = int(sum(class_occurences) / len(class_occurences))
-                    # number of classes that are above average
-                    n_max_classes = len([x for x in class_occurences if x > original_average])
-
-                    # for each class above average, we run the following procedure
-                    for i in range(n_max_classes):
-                        # here we want to make the classes more balanced
-                        # idea: move from majority one sample to each minority class
-                        max_occurence = max(class_occurences)
-                        max_index = class_occurences.index(max_occurence)
-                        median = int(np.median(class_occurences))
-
-                        print(max_occurence - median)
-                        class_occurences[max_index] = median
-                        for i in range(max_occurence - median):
-                            min_occ_index = np.argmin(class_occurences)
-                            class_occurences[min_occ_index] += 1
-
+            #  Maybe we sampled too much, so we have to adjust the class occurences (randomly)
+            if sum(class_occurences) > node.n_samples:
+                remove_occs = np.random.choice(len(class_occurences), sum(class_occurences) - node.n_samples)
+                for i in remove_occs:
+                    class_occurences[i] = class_occurences[i] - 1
             assert sum(class_occurences) == node.n_samples
 
             # maybe we have rounding errors --> Add random samples until n_samples == class_occurences
@@ -731,29 +648,58 @@ class ImbalanceGenerator:
                 current_samples = sum(class_occurences)
 
             assert sum(class_occurences) == node.n_samples
-
             node.class_occurences = class_occurences
 
         return group_nodes
 
+    @staticmethod
+    def _get_distribution_parameter(imbalance_degree):
+        if imbalance_degree == "very_balanced":
+            return 0
+        elif imbalance_degree == "balanced":
+            return 1
+        elif imbalance_degree == "medium":
+            return 2
+        elif imbalance_degree == "imbalanced":
+            return 3
+        elif imbalance_degree == "very_imbalanced":
+            return 5
 
-def discrete_gauss(a, n, size, random_state):
-    """
-    Wrapper around a discretized gaussian distribution. No need to call .rvs.
-    a and random_state are not used but are there for convenience to have a unique interface for the
-    probability distributions.
-    :param a:
-    :param n:
-    :param size:
-    :param random_state:
-    :return:
-    """
-    import scipy.special as sps
-    f = np.array([sps.comb(n - 1, i, exact=True) for i in range(n)], dtype='O')
-    f = np.float64(f) / np.float64(f).sum()
+    @staticmethod
+    def _get_group_distribution_parameter(imbalance_degree):
+        if imbalance_degree == "very_balanced":
+            return 0
+        elif imbalance_degree == "balanced":
+            return 0.5
+        elif imbalance_degree == "medium":
+            return 1
+        elif imbalance_degree == "imbalanced":
+            return 1.5
+        elif imbalance_degree == "very_imbalanced":
+            return 2
 
-    if not np.allclose(f.sum(), 1.0):
-        raise ValueError("The distribution sum is not close to 1.\n"
-                         "f.sum(): %s" % f.sum())
-    f = np.random.choice(n, size, p=f)
-    return f
+
+if __name__ == '__main__':
+    c = 30
+    f = 50
+    gi = "very_imbalanced"
+    gs = 0.5
+    n = 1000
+    co = 1.5
+
+    for ci in ["very_balanced","balanced", "medium", "imbalanced", "very_imbalanced"]:
+        print(f"Using config: c={c}, co={co}, gi={gi}, ci={ci}, gh={gs}")
+        generator = ImbalanceGenerator(n_features=50,
+                                       n=n,
+                                       # n_levels=4,
+                                       c=c,
+                                       features_remove_percent=0,
+                                       hardcoded=False,
+                                       group_imbalance=gi,
+                                       class_overlap=co,
+                                       cls_imbalance=ci,
+                                       root=EngineTaxonomy().create_taxonomy(),
+                                       gs=gs,
+                                       n_group_features=10)
+        df = generator.generate_data_with_product_hierarchy()
+        print(generator.gini(df["target"].to_numpy()))
