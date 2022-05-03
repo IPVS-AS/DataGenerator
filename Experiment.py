@@ -4,9 +4,7 @@ import random
 import warnings
 from itertools import product
 
-from anytree import PreOrderIter, RenderTree
-
-from SPH_CPI import SPHandCPI, SPH, RandomForestClassMethod, RandomForestBorutaMethod, CPI, \
+from ClassificationPartitioningMethods import SPHandCPI, SPH, RandomForestClassMethod, RandomForestBorutaMethod, CPI, \
     random_forest_parameters, KMeansClassification, GMMClassification, BirchClassification, RFperGroup
 
 import pandas as pd

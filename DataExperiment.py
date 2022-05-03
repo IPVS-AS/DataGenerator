@@ -206,113 +206,115 @@ metric_mapping = {
 }
 
 if __name__ == '__main__':
-    if __name__ == '__main__':
-        ####################################################################
-        ## Define the possible configurations for the generated Datasets ###
-        # Makes it a lot easier
-        # --> Do not need that much for loops and automatically store configurations in csv files.
-        varying_parameters = {
-            "gs": [0, 0.25,
-                   0.5,
-                0.75, 1.0
-                   ],
-            "n_group_features": [1, 5,
-                                 10,
-                15, 20
-                                 ],
-            "group_imbalance": [
-                #'very_balanced', 'balanced',
-                'medium',
-                'imbalanced',
-                #'very_imbalanced'
-            ],
-            "cls_imbalance": [
-                #'very_balanced', 'balanced',
-                'medium',
-                #'imbalanced', 'very_imbalanced'
-            ]
-        }
+    ####################################################################
+    ## Define the possible configurations for the generated Datasets ###
+    # Makes it a lot easier
+    # --> Do not need that much for loops and automatically store configurations in csv files.
+    varying_parameters = {
+        "gs": [0, 0.05, 0.1, 0.15,
+                0.25,
+                0.5,
+             0.75, 1.0
+               ],
+        "n_group_features": [1, 5,
+                             10,
+            15, 20, 25, 30, 40
+                             ],
+        "group_imbalance": [
+            #'very_balanced', 'balanced',
+            'medium',
+            #'imbalanced',
+            #'very_imbalanced'
+        ],
+        "cls_imbalance": [
+            #'very_balanced', 'balanced',
+            'medium',
+            #'imbalanced', 'very_imbalanced'
+        ]
+    }
 
-        default_parameter_setting = {
-            "n": 1000,
-            "n_features": 50,
-            "c": 20,
-            "gs": 0.5,
-            "features_remove_percent": 0,
-            "n_group_features": 10,
-            "group_imbalance":
-                'imbalanced',
-            "cls_imbalance": 'medium',
-        }
-        #####################################################################
+    default_parameter_setting = {
+        "n": 1000,
+        "n_features": 50,
+        "c": 20,
+        "gs": 0.5,
+        "features_remove_percent": 0,
+        "n_group_features": 10,
+        "group_imbalance":
+            'imbalanced',
+        "cls_imbalance": 'medium',
+    }
+    #####################################################################
 
-        #####################################################################
-        ### Check for existing results ######################################
-        if Path("stats.csv").is_file() and Path("predictions.csv").is_file():
-            stats_df = pd.read_csv("stats.csv", sep=';', decimal=',', index_col=0)
-            pred_df = pd.read_csv("predictions.csv", sep=';', decimal=',', index_col=0)
-        else:
-            stats_df = pd.DataFrame()
-            pred_df = pd.DataFrame()
-        #####################################################################
+    #####################################################################
+    ### Check for existing results ######################################
+    if Path("stats.csv").is_file() and Path("predictions.csv").is_file():
+        stats_df = pd.read_csv("stats.csv", sep=';', decimal=',', index_col=0)
+        pred_df = pd.read_csv("predictions.csv", sep=';', decimal=',', index_col=0)
+    else:
+        stats_df = pd.DataFrame()
+        pred_df = pd.DataFrame()
+    #####################################################################
 
-        gini_df = pd.DataFrame()
-        # Do this if we want to iterate over all possible combinations
-        # for data_config_values in product(*data_configs.values()):
-        for parameter, parameter_values in varying_parameters.items():
-            for parameter_value in parameter_values:
-                data_config = default_parameter_setting.copy()
-                data_config.update({parameter: parameter_value})
-                print('---------------------------------')
-                if _result_available([stats_df, pred_df], data_config):
-                    print(f"skipping config {data_config}")
-                    continue
+    gini_df = pd.DataFrame()
+    # Do this if we want to iterate over all possible combinations
+    # for data_config_values in product(*data_configs.values()):
+    for parameter, parameter_values in varying_parameters.items():
+        for parameter_value in parameter_values:
+            data_config = default_parameter_setting.copy()
+            data_config.update({parameter: parameter_value})
+            print('---------------------------------')
+            if _result_available([stats_df, pred_df], data_config):
+                print(f"skipping config {data_config}")
+                continue
 
-                print('---------------------------------')
-                print(f"Running with config:")
-                print(f'{data_config}')
-                start = time.time()
-                f = data_config["n_features"]
-                generator = ImbalanceGenerator(hardcoded=False,
-                                               class_overlap=1.5,
-                                               root=EngineTaxonomy().create_taxonomy(),
-                                               **data_config)
-                df = generator.generate_data_with_product_hierarchy()
-                df = df.drop("index", axis=1)
-                df = df.dropna(how="any")
+            print('---------------------------------')
+            print(f"Running with config:")
+            print(f'{data_config}')
+            start = time.time()
+            f = data_config["n_features"]
+            generator = ImbalanceGenerator(hardcoded=False,
+                                           class_overlap=1.5,
+                                           root=EngineTaxonomy().create_taxonomy(),
+                                           **data_config)
+            df = generator.generate_data_with_product_hierarchy()
+            df = df.drop("index", axis=1)
+            df = df.dropna(how="any")
 
-                print(f"Rows with missing values: {df.shape[0] - df.dropna().shape[0]}")
-                X, y = df[[f"F{i}" for i in range(f)]].to_numpy(), df["target"].to_numpy()
-                groups = np.unique(df["group"].to_numpy())
+            print(f"Rows with missing values: {df.shape[0] - df.dropna().shape[0]}")
+            X, y = df[[f"F{i}" for i in range(f)]].to_numpy(), df["target"].to_numpy()
+            groups = np.unique(df["group"].to_numpy())
 
-                # dataset_gini_df = pd.DataFrame()
-                # gini_groups = generator.gini(df["group"])
-                # print(gini_groups)
-                # dataset_gini_df["Gini (G)"] = [gini_groups]
-                # print(dataset_gini_df)
-                # _update_data_informations([dataset_gini_df], data_config)
-                # gini_df = pd.concat([gini_df, dataset_gini_df])
-                # print(gini_df)
-                # gini_df.to_csv("gini_groups.csv", sep=';', decimal=',', index=True)
+            # dataset_gini_df = pd.DataFrame()
+            # gini_groups = generator.gini(df["group"])
+            # print(gini_groups)
+            # dataset_gini_df["Gini (G)"] = [gini_groups]
+            # print(dataset_gini_df)
+            # _update_data_informations([dataset_gini_df], data_config)
+            # gini_df = pd.concat([gini_df, dataset_gini_df])
+            # print(gini_df)
+            # gini_df.to_csv("gini_groups.csv", sep=';', decimal=',', index=True)
 
-                # Statistics
-                stats = extract_statistics_from_data(X, y)
-                predictions = pd.DataFrame()
-                # accuracy
-                accuracy_x, accuracy_groups, predictions = calculate_accuracy()
-                stats["Acc (X)"] = accuracy_x
-                stats["Acc (G)"] = accuracy_groups
-                stats["Acc (G - X)"] = accuracy_groups - accuracy_x
+            # Statistics
+            stats = extract_statistics_from_data(X, y)
+            predictions = pd.DataFrame()
+            # accuracy
+            accuracy_x, accuracy_groups, predictions = calculate_accuracy()
+            stats["Acc (X)"] = accuracy_x
+            stats["Acc (G)"] = accuracy_groups
+            stats["Acc (G - X)"] = accuracy_groups - accuracy_x
 
-                # update data config to dataframes
-                _update_data_informations([stats, predictions], data_config)
+            # update data config to dataframes
+            _update_data_informations([stats,
+                                       predictions
+                                       ], data_config)
 
-                # To CSV
-                stats_df = pd.concat([stats_df, pd.DataFrame(columns=stats.keys(), data=stats)])
-                stats_df.to_csv('stats.csv', sep=';', decimal=',', index=True)
-                pred_df = pd.concat([pred_df, predictions])
-                pred_df.to_csv(f'predictions.csv', sep=';', decimal=',', index=True)
-                print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-                print(f"Took {time.time() - start}s for f={f}")
-                print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            # To CSV
+            stats_df = pd.concat([stats_df, pd.DataFrame(columns=stats.keys(), data=stats)])
+            stats_df.to_csv('stats.csv', sep=';', decimal=',', index=True)
+            # pred_df = pd.concat([pred_df, predictions])
+            pred_df.to_csv(f'predictions.csv', sep=';', decimal=',', index=True)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print(f"Took {time.time() - start}s for f={f}")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 

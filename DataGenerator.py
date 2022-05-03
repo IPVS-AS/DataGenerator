@@ -134,12 +134,12 @@ class ImbalanceGenerator:
         The hierarchy is implicitly given through the specific attributes that represent the hierarchy.
         """
 
-        if self.cls_imbalance not in ImbalanceGenerator.imbalance_degrees:
+        if isinstance(self.cls_imbalance, str) and self.cls_imbalance not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"cls_imbalance_degree should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {self.cls_imbalance}")
             self.logger.warning(f"Setting cls_imbalance_degree to default 'medium'")
             self.cls_imbalance = "medium"
-        if self.group_imbalance not in ImbalanceGenerator.imbalance_degrees:
+        if isinstance(self.group_imbalance, str) and self.group_imbalance not in ImbalanceGenerator.imbalance_degrees:
             self.logger.error(f"group_imbalance should be one of {ImbalanceGenerator.imbalance_degrees} but got"
                               f" {self.group_imbalance}")
             self.logger.warning(f"Setting group_imbalance to default 'medium'")
@@ -665,6 +665,8 @@ class ImbalanceGenerator:
         elif imbalance_degree == "very_imbalanced":
             return 5
 
+        return imbalance_degree
+
     @staticmethod
     def _get_group_distribution_parameter(imbalance_degree):
         if imbalance_degree == "very_balanced":
@@ -678,16 +680,19 @@ class ImbalanceGenerator:
         elif imbalance_degree == "very_imbalanced":
             return 2
 
+        return imbalance_degree
+
 
 if __name__ == '__main__':
     c = 30
     f = 50
-    gi = "very_imbalanced"
-    gs = 0.5
+    #gi = "very_imbalanced"
+    ci = 1
+    gs = 0
     n = 1000
     co = 1.5
 
-    for ci in ["very_balanced","balanced", "medium", "imbalanced", "very_imbalanced"]:
+    for gi in range(10):
         print(f"Using config: c={c}, co={co}, gi={gi}, ci={ci}, gh={gs}")
         generator = ImbalanceGenerator(n_features=50,
                                        n=n,
@@ -702,4 +707,5 @@ if __name__ == '__main__':
                                        gs=gs,
                                        n_group_features=10)
         df = generator.generate_data_with_product_hierarchy()
-        print(generator.gini(df["target"].to_numpy()))
+        print(ci)
+        print(generator.gini(df["group"]))

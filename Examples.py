@@ -4,8 +4,7 @@ import numpy as np
 from anytree import RenderTree
 
 from Hierarchy import HardCodedHierarchy
-from SPH_CPI import RandomForestClassMethod, KMeansClassification, \
-    BirchClassification, SPHandCPI
+from ClassificationPartitioningMethods import RandomForestClassMethod,  SPHandCPI
 from DataGenerator import ImbalanceGenerator
 from Utility import train_test_splitting, get_train_test_X_y
 
@@ -79,7 +78,7 @@ print("-------------------------------------")
 predictions_df = classif_method.get_predictions_df()
 print("-------------------------------------")
 print("Predictions:")
-print(predictions_df)
+print(predictions_df.to_csv("test.csv"))
 print("-------------------------------------")
 
 rf = RandomForestClassMethod()
