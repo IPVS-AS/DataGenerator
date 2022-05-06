@@ -1,4 +1,0 @@
-;Gini (G);n;n_features;c;gs;features_remove_percent;n_group_features;group_imbalance;cls_imbalance
-0;0,40544;1000;50;30;0,0;0;10;medium;medium
-0;0,40544;1000;50;30;0,25;0;10;medium;medium
-0;0,40544;1000;50;30;0,5;0;10;medium;medium

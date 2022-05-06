@@ -1,12 +1,32 @@
+
+## 1.) Data Generation
+# Used for generating data (make_classification)
+# We also used it in our evaluation for the training/test split and to apply the Random Forest
+scikit_learn==1.0.1
+
+# Used to create the taxonomy/ tree-structure
 anytree==2.8.0
-Boruta==0.3
+
+# Used to apply the Zipf distribution
+scipy==1.7.2
+
+## 2.) Evaluation
+# Used to calculate the Gini coefficient for the classes and groups
 concentrationMetrics==0.5.1
-imbalanced_learn==0.8.1
-imblearn==0.0
+
+# Used to calculate the accuracy separately for minority/majority classes as well as for each group
+fairlearn==0.7.0
+
+# Used to calculate the complexity Measures
+pymfe==0.4.1
+
+
+## 3.) Others
+
+# visualization
+seaborn==0.11.2
 matplotlib==3.5.0
+
+# Handling data
 numpy==1.21.4
 pandas==1.1.5
-scikit_clean==0.1.2
-scikit_learn==1.0.1
-scipy==1.7.2
-seaborn==0.11.2
