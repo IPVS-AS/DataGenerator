@@ -1,18 +1,46 @@
 # Synthetic Data Generation for Imbalanced Multi-class Problems with Heterogeneous Groups
 
-This repository contains the code for the submitted paper "Synthetic Data Generation for Imbalanced  Multi-class Problems with Heterogeneous Groups".
+This repository contains the code for the submitted paper "Synthetic Data Generation for Imbalanced Multi-class Problems with Heterogeneous Groups".
 
 The repository contains (i) an installation instruction, (ii) the code for the data generator, 
 (iii) the code for the used taxonomy, (iv) the code for the experiments of our evaluation, 
 and (v) an example notebook on how to use the generator.
 
-## Installation
-The installation is pretty straight-forward.
-First, you need to install Python 3.9. 
-The used packages can be found in the ``requirements.txt`` file. 
-We also annotated for which purpose we used each of the packages.
-The packages can be installed using ``pip install -r requirements.txt`` from the command line.
-To use the generator in other projects, you might consider adding the directory of the generator project to your PATH or PYTHONPATH. 
+## Installation and Execution
+
+This section describes how to run the full example of this project, which consists mainly of evaluation and plot generation. 
+
+### Prerequisites 
+
+To run the script successfully, Python 3.9 must be installed and the environment variable `python` must point to this version.
+This can be achieved by installing Python 3.9 system-wide or using a Python environment manager such as [Anaconda](https://anaconda.org/). 
+
+If Anaconda is installed, the following steps must be performed: 
+
+1. Create a virtual environment with the command `conda create -n data_generator_p39 python=3.9`
+2. Activate the environment with the command `conda activate data_generator_p39`
+
+### Execution
+
+This script does not install or overwrite any packages already installed in the Python environment, but creates a package that contains all required Python packages and libraries (e.g. NumPy, Pandas etc.) in the required version.
+
+To run the script, the `RunExample.py` file must be executed. This script needs a parameter `mode`. This parameter determines whether the complete evaluation is executed or only the generated plot. The reason for this is that the complete evaluation can take several hours or even days (depending on the host computer). Please note that it is not necessary to run the evaluation before plot generation is possible. Due to the long runtime, the evaluation results are included in this repository.
+
+To run the full evaluation (evaluation and plots) execute the script as follows: 
+
+```bash
+python RunExample.py -m eval
+```
+
+If the plot generation is sufficient run the script with: 
+
+```bash
+python RunExample.py -m plot
+```
+
+The evaluation files are generated in the `evaluation` folder and the plot files in the `generated_plots` folder.
+
+To recompile the LaTeX document, unpack the file `DataGenerator.zip` into the root directory of the project. Then run the plot generation (`python RunExample.py -m plot`). The plots will be automatically copied to the LaTeX part of the project. Since the LaTeX project was mainly created with [overleaf](https://www.overleaf.com/), it works best if you upload it to overleaf and recompile it there. Also, the "Main Document" option in the project settings must be changed to `btw/btw.tex`. 
 
 ## Data Generation
 

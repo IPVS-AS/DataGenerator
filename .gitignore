@@ -3,3 +3,7 @@
 /.idea/
 /__pycache__/
 /Examples/.ipynb_checkpoints/
+
+/dist
+.DS_Store
+DataGenerator.egg-info
