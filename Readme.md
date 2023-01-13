@@ -2,11 +2,11 @@
 
 This repository contains the code for the submitted paper "Synthetic Data Generation for Imbalanced Multi-class Problems with Heterogeneous Groups".
 
-The repository contains (i) an installation instruction, (ii) the code for the data generator, 
+The repository contains (i) an installation and reproducibility instruction, (ii) the code for the data generator, 
 (iii) the code for the used taxonomy, (iv) the code for the experiments of our evaluation, 
 and (v) an example notebook on how to use the generator.
 
-## Installation and Execution
+## Installation and Reproducibility
 
 This section describes how to run the full example of this project, which consists mainly of evaluation and plot generation. 
 
@@ -17,30 +17,37 @@ This can be achieved by installing Python 3.9 system-wide or using a Python envi
 
 If Anaconda is installed, the following steps must be performed: 
 
-1. Create a virtual environment with the command `conda create -n data_generator_p39 python=3.9`
-2. Activate the environment with the command `conda activate data_generator_p39`
+1. Create a virtual environment with the command `conda create -n data_generator python=3.9`
+2. Activate the environment with the command `conda activate data_generator`
 
-### Execution
+### Reproducibility
 
-This script does not install or overwrite any packages already installed in the Python environment, but creates a package that contains all required Python packages and libraries (e.g. NumPy, Pandas etc.) in the required version.
+The script `Reproducibility.py` installs the required packages, runs our experiments and/or generates the Figures that we use in our paper.
+Note that executing our whole evaluation script may take up to one or two days.
+However, we already provide the files of our evaluation in the `/evaluation` folder.
+Thus, it is possible to either only generate the plots from our evaluation results that we already provide or run the whole evaluation again.
+This can be specified via arguments on the command line. 
 
-To run the script, the `RunExample.py` file must be executed. This script needs a parameter `mode`. This parameter determines whether the complete evaluation is executed or only the generated plot. The reason for this is that the complete evaluation can take several hours or even days (depending on the host computer). Please note that it is not necessary to run the evaluation before plot generation is possible. Due to the long runtime, the evaluation results are included in this repository.
+To create the plots from our provided evaluation results run the script as follows: 
+```bash
+python Reproducibility.py -m plot
+```
+Note that this might still take up a few minutes, as we first install all required packages and then run the code to create the plots.
 
-To run the full evaluation (evaluation and plots) execute the script as follows: 
+
+To rerun all experiments, execute the script as:
 
 ```bash
-python RunExample.py -m eval
+python Reproducibility.py -m eval
 ```
 
-If the plot generation is sufficient run the script with: 
+The evaluation files are generated in the `/evaluation` folder and the plot files in the `/generated_plots` folder.
 
-```bash
-python RunExample.py -m plot
-```
-
-The evaluation files are generated in the `evaluation` folder and the plot files in the `generated_plots` folder.
-
-To recompile the LaTeX document, unpack the file `DataGenerator.zip` into the root directory of the project. Then run the plot generation (`python RunExample.py -m plot`). The plots will be automatically copied to the LaTeX part of the project. Since the LaTeX project was mainly created with [overleaf](https://www.overleaf.com/), it works best if you upload it to overleaf and recompile it there. Also, the "Main Document" option in the project settings must be changed to `btw/btw.tex`. 
+To recompile the LaTeX document with the updated plots unpack the latex source files `DataGenerator.zip` into the root directory of the project. 
+Then run the plot generation (`python RunExample.py -m plot`). 
+The plots will be automatically copied to the LaTeX part of the project (i.e., in the `Figures` folder of the latex project).
+Subsequently, you can recompile the latex document with your local Latex installation or using [overleaf](https://www.overleaf.com/).
+Note that  in overleaf, the "Main Document" option in the project settings must be changed to `btw/btw.tex`. 
 
 ## Data Generation
 

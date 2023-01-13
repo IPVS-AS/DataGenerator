@@ -15,6 +15,8 @@ def main(mode: str):
     if os.path.isdir('dist'): os.rmdir('dist')
 
     #create package
+    os.system('python Setup.py install')
+
     os.system('python Setup.py bdist_wheel')
 
     whl_files = glob.glob('dist/*.whl')

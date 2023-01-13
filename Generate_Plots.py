@@ -48,6 +48,8 @@ f = 50
 gi = 1.5
 gs = 0.5
 n = 1000
+print("Generating Plots for Multi-Class Imbalance Evaluation ....")
+print("This might take a few minutes as we still execute the evaluation for this part ")
 
 for ci in range(0, 6):
     print("-----------------------")
@@ -102,21 +104,11 @@ for ci in range(0, 6):
     maj_acc_frame = frame[frame['count'] >= frame['count'].median()]
     maj_acc = maj_acc_frame['accuracy'].sum() / sum(maj_acc_frame["count"])
     acc_per_ci["cls_imbalance"].append(ci)
-    #min_acc = frame[frame['count'] < frame['count'].median()]['accuracy'].mean()
     acc_per_ci["accuracy"].append(maj_acc)
     acc_per_ci["accuracy Type"].append("Majority")
     
     print(f"minority: {frame[frame['count'] < frame['count'].median()]['accuracy'].sum()}")
     print(f"majority: {frame[frame['count'] >= frame['count'].median()]['accuracy'].sum()}")
-
-
-# In[ ]:
-
-
-
-
-
-# In[189]:
 
 
 import seaborn as sns
@@ -152,7 +144,7 @@ ax.set_ylabel("Accuracy")
 ax.set_xticks([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
 
 plt.savefig(f"generated_plots/C1_accuracy_min_maj.pdf", bbox_inches='tight')
-
+print("saved figure 'C1_accuracy_min_maj.pdf' in folder 'generated_plots'")
 
 # # Evaluation of DC2a (Section 5.3 - Figure 5)
 
@@ -160,73 +152,23 @@ plt.savefig(f"generated_plots/C1_accuracy_min_maj.pdf", bbox_inches='tight')
 
 
 import os
-
+print("Pre-processing evaluation results for heterogeneous groups...")
 stat_files = [x for x in os.listdir("evaluation/") if "stats" in x and ".csv" in x]
 prediction_files = [x for x in os.listdir("evaluation/") if "pred" in x and ".csv" in x]
-
-
-# In[91]:
-
-
 stats_df = pd.concat([pd.read_csv(Path("evaluation") / stat_file, delimiter=";", decimal=",") for stat_file in stat_files])
 predictions_df = pd.concat([pd.read_csv(Path("evaluation") / pred_file, delimiter=";", decimal=",") for pred_file in prediction_files])
 stats_df["Gini (G)"] *= 100
-
-
-# In[97]:
-
-
+threshold = 0.14
+stats_df["f1v.mean (G)"] -= threshold
 stats_df = stats_df.reset_index()
-
-
-# In[98]:
-
-
-stats_df["Gini (G)"]
-
-
-# In[149]:
-
-
 dc2a_stats_df = stats_df[(stats_df["sC"] == 2) & (stats_df["gs"] == 0.5) &( stats_df["cf"] == 10)]
-dc2a_stats_df[["Gini (G)", "sG"]]
-
-
-# In[100]:
-
-
 group_stats = stats_df[["min #n groups", "max #n groups", "sG"]]
-group_stats
-
-
-# In[133]:
-
-
 group_stats_melt = group_stats.melt(['sG'], var_name='Aggregation', value_name='#n')
-#group_stats_melt["sG"] = pd.Categorical(group_stats_melt["sG"], categories=["very_balanced", "balanced", "medium", "imbalanced", "very_imbalanced"], ordered=True)
-#group_stats_melt = group_stats.dropna(axis=0, how="any")
 group_stats_melt = group_stats_melt.drop_duplicates()
-
 group_stats_melt = group_stats_melt[~group_stats_melt["sG"].isna()]
-group_stats_melt
-
-
-# In[150]:
-
-
 # For some reason not the correct value is plotted
-# Probably because we use two aggregationsin the bar plot, so we have to double the sG values
+# Probably because we use two aggregations in the bar plot, so we have to double the sG values
 dc2a_stats_df["sG"] = dc2a_stats_df["sG"] * 2
-
-
-# In[142]:
-
-
-dc2a_stats_df
-
-
-# In[151]:
-
 
 def show_values_on_bars(axs, rotate=False):
     def _show_on_single_plot(ax):        
@@ -241,18 +183,20 @@ def show_values_on_bars(axs, rotate=False):
             _show_on_single_plot(ax)
     else:
         _show_on_single_plot(axs)
+
+
+print("Generating plot for Group Imbalance...")
+
 import matplotlib
 font = {#'family' : 'normal',
         #'weight' : 'normal',
         'size'   : 14}
 
 matplotlib.rc('font', **font)
-import matplotlib.ticker as mtick
 fig = plt.figure()
 palette = sns.color_palette("Paired")[0:2]
 ax = sns.barplot(data=group_stats_melt, x="sG", y="#n", hue="Aggregation", ci=None, palette=palette)
 show_values_on_bars(ax)
-#ax.set_xticklabels([0.0, 0.5, 1.0, 1.5, 2.0])
 ax.set_ylabel("#Instances (n) for groups")
 ax.set_ylim(0, 500)
 ax.legend(labels=["Minimum", "Maximum"], title="Aggregation")
@@ -263,71 +207,30 @@ ax2 = sns.lineplot(data=dc2a_stats_df, x="sG", y="Gini (G)", color='r', marker="
                    ci=None)
 ax2.set_ylim(0, 75)
 ax2.set_yticks(range(0, 80, 10))
-#ax2.set_xlim(0,2)
-#ax2.set_xticklabels([0.0, 0.5, 1.0, 1.5, 2.0])
 
 ax2.legend(loc="upper center", bbox_to_anchor=(0.55, 0.99))
 ax2.set_ylabel("Gini Coefficient (%)")
 fig.savefig("generated_plots/C2a_Group_imbalance.pdf", bbox_inches='tight')
-
+print("saved figure 'C2a_Group_imbalance.pdf' in folder 'generated_plots'")
 
 # # Evaluation of DC2b: Group Heterogeneity (Section 5.4 - Figures 6 and 7) 
 
-# ## Complexity Measures (Figure 6) 
-
-# In[249]:
-
+# ## Complexity Measures (Figure 6)
 
 stats_heter_df = stats_df[(stats_df["sC"] == 2)
                               & (stats_df["sG"] == 1)]
-stats_heter_df.columns
-
-
-# In[250]:
-
-
-stats_heter_df[["f1.mean (C)", "f1.mean (G)", "f1v.mean (C)", "f1v.mean (G)", "n1 (C)", "n1 (G)","gs", "cf"]]
-stats_heter_df["f1v.mean (G)"] -= 0.14
-
-
-# In[251]:
-
-
-stats_heter_df["f1v.mean (G)"]
-
-
-# In[202]:
-
-
-#stats_heter_df = stats_heter_df[stats_heter_df["cf"] == 1]
-
-
-# In[252]:
-
 
 mapping = {"f1.mean (C)": "Fishers DR (C)","f1.mean (G)": "Fishers DR (G)", "f1v.mean (C)": "Fishers DRv (C)","f1v.mean (G)": "Fishers DRv (G)", "n1 (C)": "Border Points (C)", "n1 (G)": "Border Points (G)"}
 stats_heter_df = stats_heter_df.rename(mapping, axis=1)
-
-
-# In[253]:
-
 
 c2b_parameters = ["gs", "cf"]
 parameter_mapping = {"gs": "Group separation (GS)", "cf": "#charact. Features (CF)"}
 c2b_measures = ["Border Points (C)", "Border Points (G)", "Fishers DRv (G)","Fishers DRv (C)"]
 complexity_measures_df = stats_heter_df[c2b_parameters + c2b_measures]
 
-
-# In[254]:
-
-
 group_diff_cms_df = complexity_measures_df.melt(c2b_parameters, var_name='Measure', value_name='Measure Values')
-group_diff_cms_df
 
-
-# In[261]:
-
-
+print("Generating plots for complexity measures regarding heterogeneous class patterns ...")
 import matplotlib
 plt.figure()
 parameter = "gs"
@@ -352,9 +255,7 @@ plt.legend(bbox_to_anchor=(-0.2, 1.2), ncol=4, loc="center left", title="Complex
 ax.spines['right'].set_visible(False)
 ax.spines['top'].set_visible(False)
 plt.savefig(f"generated_plots/C2b_{parameter}_measures.pdf", bbox_inches='tight')
-
-
-# In[265]:
+print(f"saved figure 'C2b_{parameter}_measures.pdf' in folder 'generated_plots'")
 
 
 import matplotlib
@@ -381,23 +282,18 @@ plt.legend(bbox_to_anchor=(-0.2, 1.2), ncol=4, loc="center left", title="Complex
 ax.spines['right'].set_visible(False)
 ax.spines['top'].set_visible(False)
 plt.savefig(f"generated_plots/C2b_{parameter}_measures.pdf", bbox_inches='tight')
+print(f"saved figure 'C2b_{parameter}_measures.pdf' in folder 'generated_plots'")
 
 
 # # Accuracy (Figure 7)
-
-# In[275]:
-
 
 acc_df = stats_df[(stats_df["sC"] == 2)
                               & (stats_df["sG"] == 1)]
 acc_df = stats_df[c2b_parameters + ['Acc (G)', 'Acc (X)', 'Acc (G - X)']]
 acc_df = acc_df.melt(c2b_parameters, var_name='Accuracy Type', value_name='Accuracy')
 acc_df = acc_df[acc_df["cf"] <=30]
-acc_df
 
-
-# In[277]:
-
+print("generating plots for accuracy regarding heterogeneous class patterns ...")
 
 palette = [sns.color_palette("Paired")[0], sns.color_palette("Paired")[1], sns.color_palette("Paired")[5],]
 for parameter in c2b_parameters:
@@ -417,10 +313,11 @@ for parameter in c2b_parameters:
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     plt.savefig(f"generated_plots/C2b_accuracy_{parameter}.pdf", bbox_inches='tight')
+    print(f"saved figure 'C2b_accuracy_{parameter}_measures.pdf' in folder 'generated_plots'")
 
 
-# In[ ]:
-
-
+print("Finished Generating plots!")
+print("You can now copy the files from the folder 'generated_plots' to the folder 'Figures' of our"
+      " latex sources to recompile the PDF with updated figures!")
 
 
